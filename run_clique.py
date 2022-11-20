@@ -1,4 +1,6 @@
 #!/Users/patrickwang/opt/anaconda3/bin/python
+import sys
+import inspect
 import torch
 import torch.nn.functional as F
 from torch.nn import Linear
@@ -70,6 +72,17 @@ from models import clique_MPNN
 from torch_geometric.nn.norm.graph_size_norm import GraphSizeNorm
 from modules_and_utils import decode_clique_final, decode_clique_final_speed
 
+ALL_DATASET_NAMES = ['IMDB-BINARY', 'ENZYMES', 'COLLAB', 'REDDIT-BINARY']
+
+# the inflection point of node size where we split "big" and "small" for each dataset name
+# check https://docs.google.com/spreadsheets/d/1e3rWa1f4L9ps8QpD3490XXpCaFpXke9UgzwrCOvnubw/edit?usp=sharing for node size progressions
+DATASET_NAME_SIZE_INFLECTION_POINTS = {
+    'IMDB-BINARY': 38,
+    'ENZYMES': 57,
+    'COLLAB': 133,
+    'REDDIT-BINARY': 555
+}
+
 def get_device():
     return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -79,13 +92,40 @@ def set_random_seeds():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def get_all_dataset_names():
-    return ['IMDB-BINARY']
-
 def get_dataset(dataset_name):
     return TUDataset(root='datasets/', name=dataset_name)
 
-def split_dataset(dataset):
+def print_node_size_progression(dataset):
+    node_sizes = []
+
+    for data in dataset:
+        my_graph = to_networkx(Data(x=data.x, edge_index = data.edge_index)).to_undirected()
+        node_sizes.append(my_graph.number_of_nodes())
+
+    node_sizes.sort()
+    print('\n'.join([f'{i} {size}' for i, size in enumerate(node_sizes)]))
+
+def get_dataset_small_big(dataset_name):
+    dataset = get_dataset(dataset_name)
+    inf_point = DATASET_NAME_SIZE_INFLECTION_POINTS[dataset_name]
+    big_indices = []
+    small_indices = []
+
+    for i, data in enumerate(dataset):
+        my_graph = to_networkx(Data(x=data.x, edge_index = data.edge_index)).to_undirected()
+        num_nodes = my_graph.number_of_nodes()
+
+        if num_nodes >= inf_point:
+            big_indices.append(i)
+        else:
+            small_indices.append(i)
+
+    big_dataset = dataset.index_select(big_indices)
+    small_dataset = dataset.index_select(small_indices)
+
+    return small_dataset, big_dataset
+
+def split_dataset_tvt(dataset):
     num_trainpoints = int(np.floor(0.6*len(dataset)))
     num_valpoints = int(np.floor(0.2*len(dataset)))
     num_testpoints = len(dataset) - (num_trainpoints + num_valpoints)
@@ -96,12 +136,16 @@ def split_dataset(dataset):
 
     return traindata, valdata, testdata
 
-def set_gurobi_ground_truth(testdata):
+def get_gurobi_ground_truth(testdata):
     test_data_clique = []
 
     for data in testdata:
         my_graph = to_networkx(Data(x=data.x, edge_index = data.edge_index)).to_undirected()
+
+        start_time = time.time()
         cliqno, _ = solve_gurobi_maxclique(my_graph, 500)
+        end_time = time.time()
+
         data.clique_number = cliqno
         test_data_clique.append(data)
 
@@ -153,11 +197,11 @@ def train_model(dataset, traindata, valdata):
             count=0
             if epoch % 5 == 0:
                 edge_drop_p = edge_drop_p*edge_dropout_decay
-                print("Edge_dropout: ", edge_drop_p)
+                print("Edge_dropout: ", edge_drop_p, file=sys.stderr)
 
             if epoch % 10 == 0:
                 penalty_coeff = penalty_coeff + 0.
-                print("Penalty_coefficient: ", penalty_coeff)
+                print("Penalty_coefficient: ", penalty_coeff, file=sys.stderr)
 
             #learning rate schedule
             if epoch % lr_decay_step_size == 0:
@@ -165,7 +209,7 @@ def train_model(dataset, traindata, valdata):
                             param_group['lr'] = lr_decay_factor * param_group['lr']
 
             #show currrent epoch and GPU utilizationss
-            print('Epoch: ', epoch)
+            print('Epoch: ', epoch, file=sys.stderr)
             GPUtil.showUtilization()
 
             net.train()
@@ -203,7 +247,7 @@ def train_model(dataset, traindata, valdata):
 
     return net
 
-def evaluate_on_test_set(net, testdata, test_data_clique):
+def evaluate_on_test_set(net, testdata):
     batch_size = 32
     test_loader = DataLoader(testdata, batch_size, shuffle=False)
     device = get_device()
@@ -261,13 +305,13 @@ def evaluate_on_test_set(net, testdata, test_data_clique):
             retdz = net(data_prime)
 
             t_datanet_1 = time.time() - t_datanet_0
-            print("data prep and fp: ", t_datanet_1)
+            print("data prep and fp: ", t_datanet_1, file=sys.stderr)
             t_derand_0 = time.time()
 
             sets, set_edges, set_cardinality = decode_clique_final_speed(data_prime,(retdz["output"][0]), weight_factor =0.,draw=False, beam = 1)
 
             t_derand_1 = time.time() - t_derand_0
-            print("Derandomization time: ", t_derand_1)
+            print("Derandomization time: ", t_derand_1, file=sys.stderr)
 
             for j in range(num_graphs):
                 indices = (data.batch == j)
@@ -277,8 +321,8 @@ def evaluate_on_test_set(net, testdata, test_data_clique):
                         bestedges[j] = set_edges[j].item()
 
         t_1 = time.time()-t_0
-        print("Current batch: ", count)
-        print("Time so far: ", time.time()-t_0)
+        print("Current batch: ", count, file=sys.stderr)
+        print("Time so far: ", time.time()-t_0, file=sys.stderr)
         gnn_sets[str(count)] = bestset
 
         gnn_nodes += [maxset]
@@ -289,7 +333,7 @@ def evaluate_on_test_set(net, testdata, test_data_clique):
 
     t_1 = time.time()
     total_time = t_1 - t_start
-    print("Average time per graph: ", total_time/(len(testdata)))
+    print("Average time per graph: ", total_time/(len(testdata)), file=sys.stderr)
 
     #flatten output
     flat_list = [item for sublist in gnn_edges for item in sublist]
@@ -302,13 +346,24 @@ def evaluate_on_test_set(net, testdata, test_data_clique):
         flat_list[k] = flat_list[k].item()
     gnn_nodes = (flat_list)
 
-    ratios = [gnn_nodes[i]/test_data_clique[i].clique_number for i in range(len(test_data_clique))]
-    print(f"Mean ratio: {(np.array(ratios)).mean()} +/-  {(np.array(ratios)).std()}")
+    return gnn_nodes
+
+def compare_with_gurobi(erneur_sizes, gurobi_sizes):
+    assert len(erneur_sizes) == len(gurobi_sizes)
+    ratios = [erneur_sizes[i]/gurobi_sizes[i] for i in range(len(erneur_sizes))]
+    print(f"Mean ratio: {(np.array(ratios)).mean()} +/-  {(np.array(ratios)).std()}", file=sys.stderr)
+    return ratios
 
 if __name__ == '__main__':
-    dataset = get_dataset(get_all_dataset_names()[0])
-    traindata, valdata, testdata = split_dataset(dataset)
-    net = train_model(dataset, traindata, valdata)
+    small_dataset, testdata_big = get_dataset_small_big(ALL_DATASET_NAMES[0])
+    traindata, valdata, testdata_norm = split_dataset_tvt(small_dataset)
+    net = train_model(small_dataset, traindata, valdata)
+    norm_erneur_sizes = evaluate_on_test_set(net, testdata_norm)
+    norm_gurobi_sizes = [data.clique_number for data in get_gurobi_ground_truth(testdata_norm)]
+    big_erneur_sizes = evaluate_on_test_set(net, testdata_big)
+    big_gurobi_sizes = [data.clique_number for data in get_gurobi_ground_truth(testdata_big)]
 
-    test_data_clique = set_gurobi_ground_truth(testdata)
-    evaluate_on_test_set(net, testdata, test_data_clique)
+    print('normal')
+    compare_with_gurobi(norm_erneur_sizes, norm_gurobi_sizes)
+    print('big')
+    compare_with_gurobi(big_erneur_sizes, big_gurobi_sizes)
