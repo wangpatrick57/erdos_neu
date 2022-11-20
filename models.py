@@ -24,14 +24,14 @@ from torch.nn import Parameter
 from torch.nn import Sequential as Seq, Linear, ReLU, LeakyReLU
 from torch_geometric.nn import MessagePassing
 from torch.nn import Linear, Sequential, ReLU, BatchNorm1d as BN
-from torch_geometric.data import Batch 
+from torch_geometric.data import Batch
 from torch_scatter import scatter_min, scatter_max, scatter_add, scatter_mean
 from torch import autograd
 from torch_geometric.utils import softmax, add_self_loops, remove_self_loops, segregate_self_loops, remove_isolated_nodes, contains_isolated_nodes, add_remaining_self_loops, dropout_adj
 from modules_and_utils import get_diracs, get_mask, propagate
 from modules_and_utils import derandomize_cut, GATAConv, get_diracs
 
-#from torch_geometric.nn.norm.graph_size_norm import GraphSizeNorm
+from torch_geometric.nn.norm.graph_size_norm import GraphSizeNorm
 ###########
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -64,11 +64,11 @@ class cut_MPNN(torch.nn.Module):
         self.deltas = deltas
         self.numlayers = num_layers
         self.elasticity = elasticity
-        
+
         self.bns = torch.nn.ModuleList()
         for i in range(num_layers-1):
             self.bns.append(BN( self.hidden1))
-        self.convs = torch.nn.ModuleList()        
+        self.convs = torch.nn.ModuleList()
         for i in range(num_layers - 1):
                 self.convs.append(GINConv(Sequential(
             Linear( self.hidden1,  self.hidden1),
@@ -77,7 +77,7 @@ class cut_MPNN(torch.nn.Module):
             ReLU(),
             BN(self.hidden1),
         ),train_eps=False))
-     
+
         #self.conv2 = GATAConv( self.hidden1, self.hidden2 ,heads=8)
 #         GINConv(Sequential(
 #             Linear(1,  self.hidden1),
@@ -85,16 +85,16 @@ class cut_MPNN(torch.nn.Module):
 #             Linear(self.hidden1, self.hidden1),
 #             ReLU(),
 #             BN( self.hidden1)
-        
+
         self.lin1 = Linear(self.hidden1, self.hidden1)
         self.bn2 = BN(self.hidden1)
         self.lin2 = Linear(self.hidden1, 1)
 
     def reset_parameters(self):
         self.conv1.reset_parameters()
-        #self.conv2.reset_parameters() 
+        #self.conv2.reset_parameters()
         for conv in self.convs:
-            conv.reset_parameters()    
+            conv.reset_parameters()
         for bn in self.bns:
             bn.reset_parameters()
         self.lin1.reset_parameters()
@@ -105,12 +105,12 @@ class cut_MPNN(torch.nn.Module):
     def forward(self, data, tvol = None):
         x = data.x
         edge_index = data.edge_index
-        batch = data.batch 
+        batch = data.batch
         xinit= x.clone()
         row, col = edge_index
         mask = get_mask(x,edge_index,1).to(x.dtype).unsqueeze(-1)
         x = self.conv1(x.unsqueeze(-1), edge_index)
-        xpostconv1 = x.detach() 
+        xpostconv1 = x.detach()
         x = x*mask
         for conv, bn in zip(self.convs, self.bns):
             if(x.dim()>1):
@@ -126,48 +126,48 @@ class cut_MPNN(torch.nn.Module):
 #         xpostconvs = x.detach()
         #breakpoint()
 
-        x = F.leaky_relu(self.lin1(x)) 
+        x = F.leaky_relu(self.lin1(x))
         x = x*mask
         x = self.bn2(x)
-        
+
         xpostlin1 = x.detach()
         x = F.dropout(x, p=0.5, training=self.training)
-        x = F.leaky_relu(self.lin2(x)) 
+        x = F.leaky_relu(self.lin2(x))
         x = x*mask
-        
+
 
         xprethresh = x.detach()
-        N_size = x.shape[0]    
+        N_size = x.shape[0]
         batch_max = scatter_max(x, batch, 0, dim_size= N_size)[0]
         batch_max = torch.index_select(batch_max, 0, batch)
         batch_min = scatter_min(x, batch, 0, dim_size= N_size)[0]
         batch_min = torch.index_select(batch_min, 0, batch)
-        
-        #min-max normalize       
+
+        #min-max normalize
         x = (x-batch_min)/(batch_max+1e-6-batch_min)
         x = x*mask + mask*1e-6
-        
+
 
         #add dirac in the set
         x = x + xinit.unsqueeze(-1)
-        
+
         #calculate
-        x2 = x.detach()              
+        x2 = x.detach()
         r, c = edge_index
         tv = total_var(x, edge_index, batch)
-        deg = degree(r).unsqueeze(-1) 
+        deg = degree(r).unsqueeze(-1)
         conduct_1 = (tv)
         totalvol = scatter_add(deg.detach()*torch.ones_like(x, device=device), batch, 0)+1e-6
         totalcard = scatter_add(torch.ones_like(x, device=device), batch, 0)+1e-6
-        
-                
+
+
         #receptive field
-        recvol_hard = scatter_add(deg*mask.float(), batch, 0, dim_size = batch.max().item()+1)+1e-6 
-        reccard_hard = scatter_add(mask.float(), batch, 0, dim_size = batch.max().item()+1)+1e-6 
-        
+        recvol_hard = scatter_add(deg*mask.float(), batch, 0, dim_size = batch.max().item()+1)+1e-6
+        reccard_hard = scatter_add(mask.float(), batch, 0, dim_size = batch.max().item()+1)+1e-6
+
         assert recvol_hard.mean()/totalvol.mean() <=1, "Something went wrong! Receptive field is larger than total volume."
         target = torch.zeros_like(totalvol)
-        
+
         #generate target vol
         if tvol is None:
             feasible_vols = data.recfield_vol/data.total_vol-0.0
@@ -177,8 +177,8 @@ class cut_MPNN(torch.nn.Module):
             target = tvol*totalvol.squeeze(-1)
         a = torch.ones((batch.max().item()+1,1), device = device)
         xfilt = x
-                
-        
+
+
         ###############################################################################
         #iterative rescaling
         counter_no2 = 0
@@ -186,10 +186,10 @@ class cut_MPNN(torch.nn.Module):
             counter_no2 += 1
             keep = (((a[batch]*xfilt)<1).to(x.dtype))
 
-            
+
             x_k, d_k, d_nk = xfilt*keep*mask, deg*keep*mask, deg*(1-keep)*mask
-            
-            
+
+
             diff = target.unsqueeze(-1) - scatter_add(d_nk, batch, 0)
             dot = scatter_add(x_k*d_k, batch, 0)
             a = diff/(dot+1e-5)
@@ -199,38 +199,38 @@ class cut_MPNN(torch.nn.Module):
             checki = torch.abs(target.squeeze(-1)-volcur.squeeze(-1))>0.01
 
             targetcheck = torch.abs(volcur.squeeze(-1) - target)
-            
+
             check = (targetcheck<= self.elasticity*target).to(x.dtype)
 
             if (tvol is not None):
                 pass
             if(check.sum()>=batch.max().item()+1):
                 break;
-        
+
         probs = torch.clamp(a[batch]*x*mask, max = 1., min = 0.)
         ###############################################################################
 
-            
-            
-        #collect useful numbers    
-        x2 =  ((probs - torch.rand_like(x, device = device))>0).float()         
+
+
+        #collect useful numbers
+        x2 =  ((probs - torch.rand_like(x, device = device))>0).float()
         vol_1 = scatter_add(probs*deg, batch, 0)+1e-6
-        card_1 = scatter_add(probs, batch,0) 
+        card_1 = scatter_add(probs, batch,0)
         rec_field = scatter_add(mask, batch, 0)+1e-6
         cut_size = scatter_add(x2, batch, 0)
         tv_hard = total_var(x2, edge_index, batch)
-        vol_hard = scatter_add(deg*x2, batch, 0, dim_size = batch.max().item()+1)+1e-6 
-        conduct_hard = tv_hard/vol_hard         
+        vol_hard = scatter_add(deg*x2, batch, 0, dim_size = batch.max().item()+1)+1e-6
+        conduct_hard = tv_hard/vol_hard
         rec_field_ratio = cut_size/rec_field
         rec_field_volratio = vol_hard/recvol_hard
         total_vol_ratio = vol_hard/totalvol
-        
+
         #calculate loss
-        expected_cut = scatter_add(probs*deg, batch, 0) - scatter_add((probs[row]*probs[col]), batch[row], 0)   
-        loss = expected_cut   
+        expected_cut = scatter_add(probs*deg, batch, 0) - scatter_add((probs[row]*probs[col]), batch[row], 0)
+        loss = expected_cut
 
 
-        #return dict 
+        #return dict
         retdict = {}
         retdict["output"] = [probs.squeeze(-1),"hist"]   #output
         #retdict["|Expected_vol - Target|"]= [targetcheck, "sequence"] #absolute distance from targetvol
@@ -239,7 +239,7 @@ class cut_MPNN(torch.nn.Module):
         retdict["volume_hard"] = [vol_hard.mean(),"sequence"] #volume2
         #retdict["cut1"] = [tv.mean(),"sequence"] #cut1
         retdict["cut_hard"] = [tv_hard.mean(),"sequence"] #cut1
-        retdict["Average cardinality ratio of receptive field "] = [rec_field_ratio.mean(),"sequence"] 
+        retdict["Average cardinality ratio of receptive field "] = [rec_field_ratio.mean(),"sequence"]
         retdict["Recfield volume/Total volume"] = [recvol_hard.mean()/totalvol.mean(), "sequence"]
         retdict["Average ratio of receptive field volume"]= [rec_field_volratio.mean(),'sequence']
         retdict["Average ratio of total volume"]= [total_vol_ratio.mean(),'sequence']
@@ -250,7 +250,7 @@ class cut_MPNN(torch.nn.Module):
         retdict["loss"] = [loss.mean().squeeze(),"sequence"] #final loss
 
         return retdict
-    
+
     def __repr__(self):
         return self.__class__.__name__
 
@@ -267,11 +267,11 @@ class maxcut_MPNN(torch.nn.Module):
         self.numlayers = num_layers
         self.heads = 8
         self.concat = True
-        
+
         self.bns = torch.nn.ModuleList()
         for i in range(num_layers-1):
             self.bns.append(BN(self.heads*self.hidden1, momentum=self.momentum))
-        self.convs = torch.nn.ModuleList()        
+        self.convs = torch.nn.ModuleList()
         for i in range(num_layers - 1):
                 self.convs.append(GINConv(Sequential(
             Linear( self.heads*self.hidden1,  self.heads*self.hidden1),
@@ -280,7 +280,7 @@ class maxcut_MPNN(torch.nn.Module):
             ReLU(),
             BN(self.heads*self.hidden1, momentum=self.momentum),
         ),train_eps=True))
-        self.bn1 = BN(self.heads*self.hidden1)       
+        self.bn1 = BN(self.heads*self.hidden1)
         self.conv1 = GINConv(Sequential(Linear(self.hidden2,  self.heads*self.hidden1),
             ReLU(),
             Linear( self.heads*self.hidden1,  self.heads*self.hidden1),
@@ -295,14 +295,14 @@ class maxcut_MPNN(torch.nn.Module):
         self.lin2 = Linear(self.hidden1, 1)
         self.gnorm = GraphSizeNorm()
 
-                    
+
 
 
     def reset_parameters(self):
         self.conv1.reset_parameters()
-        
+
         for conv in self.convs:
-            conv.reset_parameters() 
+            conv.reset_parameters()
         for bn in self.bns:
             bn.reset_parameters()
         self.bn1.reset_parameters()
@@ -319,18 +319,18 @@ class maxcut_MPNN(torch.nn.Module):
         edge_index = data.edge_index
         batch = data.batch
         num_graphs = batch.max().item() + 1
-        row, col = edge_index     
+        row, col = edge_index
         total_num_edges = edge_index.shape[1]
         N_size = x.shape[0]
 
-        
+
         if edge_dropout is not None:
             edge_index = dropout_adj(edge_index, edge_attr = (torch.ones(edge_index.shape[1], device=device)).long(), p = edge_dropout, force_undirected=True)[0]
             edge_index = add_remaining_self_loops(edge_index, num_nodes = batch.shape[0])[0]
-                
+
         reduced_num_edges = edge_index.shape[1]
         current_edge_percentage = (reduced_num_edges/total_num_edges)
-        no_loop_index,_ = remove_self_loops(edge_index)  
+        no_loop_index,_ = remove_self_loops(edge_index)
         no_loop_row, no_loop_col = no_loop_index
 
         xinit= x.clone()
@@ -340,8 +340,8 @@ class maxcut_MPNN(torch.nn.Module):
         x = x*mask
         x = self.gnorm(x)
         x = self.bn1(x)
-        
-            
+
+
         for conv, bn in zip(self.convs, self.bns):
             if(x.dim()>1):
                 x =  x+F.leaky_relu(conv(x, edge_index))
@@ -352,18 +352,18 @@ class maxcut_MPNN(torch.nn.Module):
 
         xpostconvs = x.detach()
         #
-        x = F.leaky_relu(self.lin1(x)) 
+        x = F.leaky_relu(self.lin1(x))
         x = x*mask
 
 
         xpostlin1 = x.detach()
-        x = F.leaky_relu(self.lin2(x)) 
+        x = F.leaky_relu(self.lin2(x))
         x = x*mask
 
 
         #calculate min and max
         batch_max = scatter_max(x, batch, 0, dim_size= N_size)[0]
-        batch_max = torch.index_select(batch_max, 0, batch)        
+        batch_max = torch.index_select(batch_max, 0, batch)
         batch_min = scatter_min(x, batch, 0, dim_size= N_size)[0]
         batch_min = torch.index_select(batch_min, 0, batch)
 
@@ -371,16 +371,16 @@ class maxcut_MPNN(torch.nn.Module):
         x = (x-batch_min)/(batch_max+1e-6-batch_min)
         probs=x
         r, c = edge_index
-        deg = degree(r).unsqueeze(-1) 
+        deg = degree(r).unsqueeze(-1)
 
-        expected_cut = -(scatter_add(probs*deg, batch, 0) - scatter_add((probs[row]*probs[col]), batch[row], 0))   
-        loss = expected_cut   
+        expected_cut = -(scatter_add(probs*deg, batch, 0) - scatter_add((probs[row]*probs[col]), batch[row], 0))
+        loss = expected_cut
 
 
 
 
         retdict = {}
-        
+
         retdict["output"] = [probs.squeeze(-1),"hist"]   #output
         retdict["losses histogram"] = [loss.squeeze(-1),"hist"]
         #retdict["Expected weight(G)"]= [expected_weight_G.mean(), "sequence"]
@@ -389,14 +389,14 @@ class maxcut_MPNN(torch.nn.Module):
         retdict["loss"] = [loss.mean().squeeze(),"sequence"] #final loss
 
         return retdict
-    
+
     def __repr__(self):
         return self.__class__.__name__
 
-        
-        
-    
-    
+
+
+
+
 class clique_MPNN(torch.nn.Module):
     def __init__(self, dataset, num_layers, hidden1, hidden2, deltas):
         super(clique_MPNN, self).__init__()
@@ -408,11 +408,11 @@ class clique_MPNN(torch.nn.Module):
         self.numlayers = num_layers
         self.heads = 8
         self.concat = True
-        
+
         self.bns = torch.nn.ModuleList()
         for i in range(num_layers-1):
             self.bns.append(BN(self.heads*self.hidden1, momentum=self.momentum))
-        self.convs = torch.nn.ModuleList()        
+        self.convs = torch.nn.ModuleList()
         for i in range(num_layers - 1):
                 self.convs.append(GINConv(Sequential(
             Linear( self.heads*self.hidden1,  self.heads*self.hidden1),
@@ -421,7 +421,7 @@ class clique_MPNN(torch.nn.Module):
             ReLU(),
             BN(self.heads*self.hidden1, momentum=self.momentum),
         ),train_eps=True))
-        self.bn1 = BN(self.heads*self.hidden1)       
+        self.bn1 = BN(self.heads*self.hidden1)
         self.conv1 = GINConv(Sequential(Linear(self.hidden2,  self.heads*self.hidden1),
             ReLU(),
             Linear( self.heads*self.hidden1,  self.heads*self.hidden1),
@@ -436,14 +436,14 @@ class clique_MPNN(torch.nn.Module):
         self.lin2 = Linear(self.hidden1, 1)
         self.gnorm = GraphSizeNorm()
 
-                    
+
 
 
     def reset_parameters(self):
         self.conv1.reset_parameters()
-        
+
         for conv in self.convs:
-            conv.reset_parameters() 
+            conv.reset_parameters()
         for bn in self.bns:
             bn.reset_parameters()
         self.bn1.reset_parameters()
@@ -460,18 +460,18 @@ class clique_MPNN(torch.nn.Module):
         edge_index = data.edge_index
         batch = data.batch
         num_graphs = batch.max().item() + 1
-        row, col = edge_index     
+        row, col = edge_index
         total_num_edges = edge_index.shape[1]
         N_size = x.shape[0]
 
-        
+
         if edge_dropout is not None:
             edge_index = dropout_adj(edge_index, edge_attr = (torch.ones(edge_index.shape[1], device=device)).long(), p = edge_dropout, force_undirected=True)[0]
             edge_index = add_remaining_self_loops(edge_index, num_nodes = batch.shape[0])[0]
-                
+
         reduced_num_edges = edge_index.shape[1]
         current_edge_percentage = (reduced_num_edges/total_num_edges)
-        no_loop_index,_ = remove_self_loops(edge_index)  
+        no_loop_index,_ = remove_self_loops(edge_index)
         no_loop_row, no_loop_col = no_loop_index
 
         xinit= x.clone()
@@ -481,8 +481,8 @@ class clique_MPNN(torch.nn.Module):
         x = x*mask
         x = self.gnorm(x)
         x = self.bn1(x)
-        
-            
+
+
         for conv, bn in zip(self.convs, self.bns):
             if(x.dim()>1):
                 x =  x+F.leaky_relu(conv(x, edge_index))
@@ -493,18 +493,18 @@ class clique_MPNN(torch.nn.Module):
 
         xpostconvs = x.detach()
         #
-        x = F.leaky_relu(self.lin1(x)) 
+        x = F.leaky_relu(self.lin1(x))
         x = x*mask
 
 
         xpostlin1 = x.detach()
-        x = F.leaky_relu(self.lin2(x)) 
+        x = F.leaky_relu(self.lin2(x))
         x = x*mask
 
 
         #calculate min and max
         batch_max = scatter_max(x, batch, 0, dim_size= N_size)[0]
-        batch_max = torch.index_select(batch_max, 0, batch)        
+        batch_max = torch.index_select(batch_max, 0, batch)
         batch_min = scatter_min(x, batch, 0, dim_size= N_size)[0]
         batch_min = torch.index_select(batch_min, 0, batch)
 
@@ -517,23 +517,23 @@ class clique_MPNN(torch.nn.Module):
         for graph in range(num_graphs):
             batch_graph = (batch==graph)
             pairwise_prodsums[graph] = (torch.conv1d(probs[batch_graph].unsqueeze(-1), probs[batch_graph].unsqueeze(-1))).sum()/2
-        
-        
+
+
         ###calculate loss terms
         self_sums = scatter_add((probs*probs), batch, 0, dim_size = num_graphs)
         expected_weight_G = scatter_add(probs[no_loop_row]*probs[no_loop_col], batch[no_loop_row], 0, dim_size = num_graphs)/2.
         expected_clique_weight = (pairwise_prodsums.unsqueeze(-1) - self_sums)/1.
-        expected_distance = (expected_clique_weight - expected_weight_G)        
-        
+        expected_distance = (expected_clique_weight - expected_weight_G)
+
         ###calculate loss
-        expected_loss = (penalty_coefficient)*expected_distance*0.5 - 0.5*expected_weight_G  
-        
+        expected_loss = (penalty_coefficient)*expected_distance*0.5 - 0.5*expected_weight_G
+
 
         loss = expected_loss
 
 
         retdict = {}
-        
+
         retdict["output"] = [probs.squeeze(-1),"hist"]   #output
         retdict["losses histogram"] = [loss.squeeze(-1),"hist"]
         retdict["Expected weight(G)"]= [expected_weight_G.mean(), "sequence"]
@@ -542,6 +542,6 @@ class clique_MPNN(torch.nn.Module):
         retdict["loss"] = [loss.mean().squeeze(),"sequence"] #final loss
 
         return retdict
-    
+
     def __repr__(self):
         return self.__class__.__name__
