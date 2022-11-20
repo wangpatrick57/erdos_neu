@@ -70,6 +70,9 @@ from models import clique_MPNN
 from torch_geometric.nn.norm.graph_size_norm import GraphSizeNorm
 from modules_and_utils import decode_clique_final, decode_clique_final_speed
 
+def get_device():
+    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 def set_random_seeds():
     torch.manual_seed(1)
     np.random.seed(2)
@@ -84,7 +87,7 @@ def get_dataset(dataset_name):
 
 def split_dataset(dataset):
     num_trainpoints = int(np.floor(0.6*len(dataset)))
-    num_valpoints = int(np.floor(num_trainpoints/3))
+    num_valpoints = int(np.floor(0.2*len(dataset)))
     num_testpoints = len(dataset) - (num_trainpoints + num_valpoints)
 
     traindata= dataset[0:num_trainpoints]
@@ -93,21 +96,35 @@ def split_dataset(dataset):
 
     return traindata, valdata, testdata
 
+def set_gurobi_ground_truth(testdata):
+    test_data_clique = []
+
+    for data in testdata:
+        my_graph = to_networkx(Data(x=data.x, edge_index = data.edge_index)).to_undirected()
+        cliqno, _ = solve_gurobi_maxclique(my_graph, 500)
+        data.clique_number = cliqno
+        test_data_clique.append(data)
+
+    return test_data_clique
+
 def train_model(dataset, traindata, valdata):
     numlayers = 5
     net = clique_MPNN(dataset, numlayers, 32, 32, 1)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = get_device()
     lr_decay_step_size = 5
     lr_decay_factor = 0.95
 
-    epochs = 3
+    epochs = 1
+
+    # sets the clique_MPNN in training mode
     net.train()
+
     retdict = {}
     edge_drop_p = 0.0
     edge_dropout_decay = 0.90
 
     # this loops through all combinations of hyperparameters
-    b_sizes = [32, 64]
+    b_sizes = [32]
     l_rates = [0.001]
     depths = [4]
     coefficients = [4.]
@@ -184,7 +201,114 @@ def train_model(dataset, traindata, valdata):
                         val[0] = val[0]/(len(train_loader.dataset)/batch_size)
                 del data_prime
 
+    return net
+
+def evaluate_on_test_set(net, testdata, test_data_clique):
+    batch_size = 32
+    test_loader = DataLoader(testdata, batch_size, shuffle=False)
+    device = get_device()
+    net.to(device)
+    count = 1
+
+    #Evaluation on test set
+    net.eval()
+
+    gnn_nodes = []
+    gnn_edges = []
+    gnn_sets = {}
+
+    #set number of samples according to your execution time, for 10 samples
+    max_samples = 8
+
+    gnn_times = []
+    num_samples = max_samples
+    t_start = time.time()
+
+    for data in test_loader:
+        num_graphs = data.batch.max().item()+1
+        bestset = {}
+        bestedges = np.zeros((num_graphs))
+        maxset = np.zeros((num_graphs))
+
+        total_samples = []
+        for graph in range(num_graphs):
+            curr_inds = (data.batch==graph)
+            g_size = curr_inds.sum().item()
+            if max_samples <= g_size:
+                samples = np.random.choice(curr_inds.sum().item(),max_samples, replace=False)
+            else:
+                samples = np.random.choice(curr_inds.sum().item(),max_samples, replace=True)
+
+            total_samples +=[samples]
+
+        data = data.to(device)
+        t_0 = time.time()
+
+        for k in range(num_samples):
+            t_datanet_0 = time.time()
+            data_prime = get_diracs(data.to(device), 1, sparse = True, effective_volume_range=0.15, receptive_field = 7)
+
+            initial_values = data_prime.x.detach()
+            data_prime.x = torch.zeros_like(data_prime.x)
+            g_offset = 0
+            for graph in range(num_graphs):
+                curr_inds = (data_prime.batch==graph)
+                g_size = curr_inds.sum().item()
+                graph_x = data_prime.x[curr_inds]
+                data_prime.x[total_samples[graph][k] + g_offset]=1.
+                g_offset += g_size
+
+            retdz = net(data_prime)
+
+            t_datanet_1 = time.time() - t_datanet_0
+            print("data prep and fp: ", t_datanet_1)
+            t_derand_0 = time.time()
+
+            sets, set_edges, set_cardinality = decode_clique_final_speed(data_prime,(retdz["output"][0]), weight_factor =0.,draw=False, beam = 1)
+
+            t_derand_1 = time.time() - t_derand_0
+            print("Derandomization time: ", t_derand_1)
+
+            for j in range(num_graphs):
+                indices = (data.batch == j)
+                if (set_cardinality[j]>maxset[j]):
+                        maxset[j] = set_cardinality[j].item()
+                        bestset[str(j)] = sets[indices].cpu()
+                        bestedges[j] = set_edges[j].item()
+
+        t_1 = time.time()-t_0
+        print("Current batch: ", count)
+        print("Time so far: ", time.time()-t_0)
+        gnn_sets[str(count)] = bestset
+
+        gnn_nodes += [maxset]
+        gnn_edges += [bestedges]
+        gnn_times += [t_1]
+
+        count += 1
+
+    t_1 = time.time()
+    total_time = t_1 - t_start
+    print("Average time per graph: ", total_time/(len(testdata)))
+
+    #flatten output
+    flat_list = [item for sublist in gnn_edges for item in sublist]
+    for k in range(len(flat_list)):
+        flat_list[k] = flat_list[k].item()
+    gnn_edges = (flat_list)
+
+    flat_list = [item for sublist in gnn_nodes for item in sublist]
+    for k in range(len(flat_list)):
+        flat_list[k] = flat_list[k].item()
+    gnn_nodes = (flat_list)
+
+    ratios = [gnn_nodes[i]/test_data_clique[i].clique_number for i in range(len(test_data_clique))]
+    print(f"Mean ratio: {(np.array(ratios)).mean()} +/-  {(np.array(ratios)).std()}")
+
 if __name__ == '__main__':
     dataset = get_dataset(get_all_dataset_names()[0])
     traindata, valdata, testdata = split_dataset(dataset)
-    train_model(dataset, traindata, valdata)
+    net = train_model(dataset, traindata, valdata)
+
+    test_data_clique = set_gurobi_ground_truth(testdata)
+    evaluate_on_test_set(net, testdata, test_data_clique)
