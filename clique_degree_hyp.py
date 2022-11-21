@@ -1,9 +1,9 @@
 #!/Users/patrickwang/opt/anaconda3/bin/python
 import sys
-from run_clique import get_dataset, ALL_DATASET_NAMES
+from dataset_utils import get_dataset, ALL_DATASET_NAMES
 from torch_geometric.utils import to_undirected, to_networkx
 from torch_geometric.data import Data
-from  cut_utils import solve_gurobi_maxclique
+from cut_utils import solve_gurobi_maxclique
 
 def get_gurobi_ground_truth(testdata, sample_every=1):
     testdata = testdata.index_select(range(0, len(testdata), sample_every))
