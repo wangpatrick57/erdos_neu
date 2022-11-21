@@ -542,6 +542,8 @@ class clique_MPNN(torch.nn.Module):
 
         regularization = scatter_add(probs*(1-probs), batch, 0, dim_size=num_graphs)
 
+        print('pen', penalty_coeff, 'reg', reg_coeff)
+
         ###calculate loss
         # the reason we do - 0.5*expected_weight_G is to capture the + 1 part of (1 + beta)
         expected_loss = (penalty_coeff)*expected_distance*0.5 - 0.5*expected_weight_G + reg_coeff * regularization

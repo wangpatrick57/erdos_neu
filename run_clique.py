@@ -339,7 +339,7 @@ def train_model(dataset, traindata, valdata, testdatas=None, penalty_coeff=4, re
             data = data.to('cpu')
             data_prime = data_prime.to(device)
 
-            retdict = net(data_prime, None, penalty_coeff) # this is where clique_MPNN.forward() is called
+            retdict = net(data_prime, None, penalty_coeff, reg_coeff) # this is where clique_MPNN.forward() is called
 
             for key,val in retdict.items():
                 if "sequence" in val[1]:
@@ -383,4 +383,4 @@ if __name__ == '__main__':
     small_dataset, big_dataset = get_dataset_small_big(dataset_name)
     traindata, valdata, testdata_norm = split_dataset_tvt(small_dataset)
     testdata_big = big_dataset
-    net = train_model(small_dataset, traindata, valdata, testdatas=(testdata_norm, testdata_big))
+    net = train_model(small_dataset, traindata, valdata, testdatas=(testdata_norm, testdata_big), penalty_coeff=penalty_coeff, reg_coeff=reg_coeff)
