@@ -532,17 +532,7 @@ class clique_MPNN(torch.nn.Module):
         expected_weight_G = scatter_add(probs[no_loop_row]*probs[no_loop_col], batch[no_loop_row], 0, dim_size = num_graphs)/2.
         expected_clique_weight = (pairwise_prodsums.unsqueeze(-1) - self_sums)/1. # this variable is the sum_vi!=vj{pi * pj}
         expected_distance = (expected_clique_weight - expected_weight_G)
-
-
-
-        test = probs*(1-probs)
-        print(probs[:10], test[:10])
-
-
-
         regularization = scatter_add(probs*(1-probs), batch, 0, dim_size=num_graphs)
-
-        print('pen', penalty_coeff, 'reg', reg_coeff)
 
         ###calculate loss
         # the reason we do - 0.5*expected_weight_G is to capture the + 1 part of (1 + beta)

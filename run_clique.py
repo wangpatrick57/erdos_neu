@@ -379,8 +379,9 @@ if __name__ == '__main__':
     dataset_name = ALL_DATASET_NAMES[int(sys.argv[1])]
     penalty_coeff = float(sys.argv[2])
     reg_coeff = float(sys.argv[3])
-    print(f'running on {dataset_name}')
+    print(f'running on {dataset_name}', file=sys.stderr)
     small_dataset, big_dataset = get_dataset_small_big(dataset_name)
     traindata, valdata, testdata_norm = split_dataset_tvt(small_dataset)
     testdata_big = big_dataset
+    print('tdnb', len(testdata_norm), len(testdata_big))
     net = train_model(small_dataset, traindata, valdata, testdatas=(testdata_norm, testdata_big), penalty_coeff=penalty_coeff, reg_coeff=reg_coeff)
