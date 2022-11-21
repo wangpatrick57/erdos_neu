@@ -925,7 +925,7 @@ class cliqueMPNN_hindsight(torch.nn.Module):
 
 
 
-    def forward(self, data, edge_dropout = None, penalty_coefficient = 0.25):
+    def forward(self, data, edge_dropout = None, penalty_coeff = 0.25):
         x = data.x
         edge_index = data.edge_index
         batch = data.batch
@@ -1039,7 +1039,7 @@ class cliqueMPNN_hindsight(torch.nn.Module):
         expected_distance = (expected_clique_weight - expected_weight_G)
         
         
-        lambda_factors = (torch.rand((30,1), device=device))*penalty_coefficient-0.10
+        lambda_factors = (torch.rand((30,1), device=device))*penalty_coeff-0.10
         
         
         #hindsight = torch.ones_like(lambda_factors)*expected_distance.unsqueeze(-1)*0.5 - lambda_factors*expected_weight_G.unsqueeze(-1)
@@ -1050,7 +1050,7 @@ class cliqueMPNN_hindsight(torch.nn.Module):
 
        # expected_loss =  #torch.median(hindsight, 1)[0]
         #print(expected_loss.shape)
-        expected_loss =expected_distance*0.5 - (penalty_coefficient)*expected_weight_G
+        expected_loss =expected_distance*0.5 - (penalty_coeff)*expected_weight_G
         
 
         
@@ -1226,7 +1226,7 @@ class cliqueMPNN_hindsight_earlyGAT(torch.nn.Module):
 
 
 
-    def forward(self, data, edge_dropout = None, penalty_coefficient = 0.25):
+    def forward(self, data, edge_dropout = None, penalty_coeff = 0.25):
         x = data.x
         edge_index = data.edge_index
         batch = data.batch
@@ -1355,7 +1355,7 @@ class cliqueMPNN_hindsight_earlyGAT(torch.nn.Module):
         expected_distance = (expected_clique_weight - expected_weight_G)
         
         
-        lambda_factors = (torch.rand((30,1), device=device))*penalty_coefficient-0.10
+        lambda_factors = (torch.rand((30,1), device=device))*penalty_coeff-0.10
         
         
         #hindsight = torch.ones_like(lambda_factors)*expected_distance.unsqueeze(-1)*0.5 - lambda_factors*expected_weight_G.unsqueeze(-1)
@@ -1366,7 +1366,7 @@ class cliqueMPNN_hindsight_earlyGAT(torch.nn.Module):
 
        # expected_loss =  #torch.median(hindsight, 1)[0]
         #print(expected_loss.shape)
-        expected_loss =(penalty_coefficient)*expected_distance- 0.5*expected_weight_G
+        expected_loss =(penalty_coeff)*expected_distance- 0.5*expected_weight_G
         
 
         

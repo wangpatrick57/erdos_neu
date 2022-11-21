@@ -1,4 +1,5 @@
 ##############################
+import sys
 import torch
 import torch.nn.functional as F
 from torch.nn import Linear
@@ -12,6 +13,7 @@ from torch.distributions import Bernoulli
 import torch.nn
 from torch_geometric.utils import convert as cnv
 from torch_geometric.utils import sparse as sp
+from torch_geometric.utils import to_networkx
 from torch_geometric.data import Data
 from torch_geometric.nn.inits import uniform
 from torch_geometric.nn.inits import glorot, zeros
@@ -314,7 +316,7 @@ class maxcut_MPNN(torch.nn.Module):
 
 
 
-    def forward(self, data, edge_dropout = None, penalty_coefficient = 0.25):
+    def forward(self, data, edge_dropout = None, penalty_coeff = 0.25):
         x = data.x
         edge_index = data.edge_index
         batch = data.batch
@@ -455,10 +457,11 @@ class clique_MPNN(torch.nn.Module):
 
 
 
-    def forward(self, data, edge_dropout = None, penalty_coefficient = 0.25):
-        x = data.x
+    def forward(self, data, edge_dropout = None, penalty_coeff = 4, reg_coeff = 0):
+        x = data.x # the length of x is the total number of nodes in all the graphs in the batch
         edge_index = data.edge_index
-        batch = data.batch
+        batch = data.batch # batch maps from position in x to the graph it's a part of
+        my_graph = to_networkx(Data(x=data.x, edge_index = data.edge_index)).to_undirected()
         num_graphs = batch.max().item() + 1
         row, col = edge_index
         total_num_edges = edge_index.shape[1]
@@ -512,22 +515,36 @@ class clique_MPNN(torch.nn.Module):
         x = (x-batch_min)/(batch_max+1e-6-batch_min)
         probs=x
 
+        # QUESTION: where is beta
         #calculating the terms for the expected distance between clique and graph
         pairwise_prodsums = torch.zeros(num_graphs, device = device)
-        for graph in range(num_graphs):
-            batch_graph = (batch==graph)
+        for graph in range(num_graphs): # num graphs is the number of graphs in a batch
+            batch_graph = (batch==graph) # this is an array of bools which represents which nodes are a part of this graph
+            # {a}: probs[batch_graph] is an array of length equal to the # of nodes in this graph, where every element is a probability of a node in that graph
+            # {b}: {a}.unsqueeze(-1) doesn't really matter and is just to set up conv1d
+            # {c}: torch.conv1d({b}, {b}) has a list of lists where each list is probs times an element of probs
+            # {d}: {c}.sum() sums across all values in all lists to return a single scalar
             pairwise_prodsums[graph] = (torch.conv1d(probs[batch_graph].unsqueeze(-1), probs[batch_graph].unsqueeze(-1))).sum()/2
 
 
         ###calculate loss terms
-        self_sums = scatter_add((probs*probs), batch, 0, dim_size = num_graphs)
+        self_sums = scatter_add((probs*probs), batch, 0, dim_size = num_graphs) # this is used to get rid of the vi = vj products
         expected_weight_G = scatter_add(probs[no_loop_row]*probs[no_loop_col], batch[no_loop_row], 0, dim_size = num_graphs)/2.
-        expected_clique_weight = (pairwise_prodsums.unsqueeze(-1) - self_sums)/1.
+        expected_clique_weight = (pairwise_prodsums.unsqueeze(-1) - self_sums)/1. # this variable is the sum_vi!=vj{pi * pj}
         expected_distance = (expected_clique_weight - expected_weight_G)
 
-        ###calculate loss
-        expected_loss = (penalty_coefficient)*expected_distance*0.5 - 0.5*expected_weight_G
 
+
+        test = probs*(1-probs)
+        print(probs[:10], test[:10])
+
+
+
+        regularization = scatter_add(probs*(1-probs), batch, 0, dim_size=num_graphs)
+
+        ###calculate loss
+        # the reason we do - 0.5*expected_weight_G is to capture the + 1 part of (1 + beta)
+        expected_loss = (penalty_coeff)*expected_distance*0.5 - 0.5*expected_weight_G + reg_coeff * regularization
 
         loss = expected_loss
 

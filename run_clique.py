@@ -151,102 +151,6 @@ def get_gurobi_ground_truth(testdata):
 
     return test_data_clique
 
-def train_model(dataset, traindata, valdata):
-    numlayers = 5
-    net = clique_MPNN(dataset, numlayers, 32, 32, 1)
-    device = get_device()
-    lr_decay_step_size = 5
-    lr_decay_factor = 0.95
-
-    epochs = 1
-
-    # sets the clique_MPNN in training mode
-    net.train()
-
-    retdict = {}
-    edge_drop_p = 0.0
-    edge_dropout_decay = 0.90
-
-    # this loops through all combinations of hyperparameters
-    b_sizes = [32]
-    l_rates = [0.001]
-    depths = [4]
-    coefficients = [4.]
-    rand_seeds = [66]
-    widths = [64]
-
-    for batch_size, learning_rate, numlayers, penalty_coeff, r_seed, hidden_1 in product(b_sizes, l_rates, depths, coefficients, rand_seeds, widths):
-        torch.manual_seed(r_seed)
-
-        train_loader = DataLoader(traindata, batch_size, shuffle=True)
-        val_loader =  DataLoader(valdata, batch_size, shuffle=False)
-
-        receptive_field= numlayers + 1
-        val_losses = []
-        cliq_dists = []
-
-        #hidden_1 = 128
-        hidden_2 = 1
-
-        net = clique_MPNN(dataset,numlayers, hidden_1, hidden_2 ,1)
-        net.to(device).reset_parameters()
-        optimizer = Adam(net.parameters(), lr=learning_rate, weight_decay=0.00000)
-
-        for epoch in range(epochs):
-            totalretdict = {}
-            count=0
-            if epoch % 5 == 0:
-                edge_drop_p = edge_drop_p*edge_dropout_decay
-                print("Edge_dropout: ", edge_drop_p, file=sys.stderr)
-
-            if epoch % 10 == 0:
-                penalty_coeff = penalty_coeff + 0.
-                print("Penalty_coefficient: ", penalty_coeff, file=sys.stderr)
-
-            #learning rate schedule
-            if epoch % lr_decay_step_size == 0:
-                for param_group in optimizer.param_groups:
-                            param_group['lr'] = lr_decay_factor * param_group['lr']
-
-            #show currrent epoch and GPU utilizationss
-            print('Epoch: ', epoch, file=sys.stderr)
-            GPUtil.showUtilization()
-
-            net.train()
-            for data in train_loader:
-                count += 1
-                optimizer.zero_grad(),
-                data = data.to(device)
-                data_prime = get_diracs(data, 1, sparse = True, effective_volume_range=0.15, receptive_field = receptive_field)
-
-                data = data.to('cpu')
-                data_prime = data_prime.to(device)
-
-                retdict = net(data_prime, None, penalty_coeff)
-
-                for key,val in retdict.items():
-                    if "sequence" in val[1]:
-                        if key in totalretdict:
-                            totalretdict[key][0] += val[0].item()
-                        else:
-                            totalretdict[key] = [val[0].item(),val[1]]
-
-                if epoch > 2:
-                        retdict["loss"][0].backward()
-                        #reporter.report()
-
-                        torch.nn.utils.clip_grad_norm_(net.parameters(),1)
-                        optimizer.step()
-                        del(retdict)
-
-            if epoch > -1:
-                for key,val in totalretdict.items():
-                    if "sequence" in val[1]:
-                        val[0] = val[0]/(len(train_loader.dataset)/batch_size)
-                del data_prime
-
-    return net
-
 def evaluate_on_test_set(net, testdata):
     batch_size = 32
     test_loader = DataLoader(testdata, batch_size, shuffle=False)
@@ -305,13 +209,13 @@ def evaluate_on_test_set(net, testdata):
             retdz = net(data_prime)
 
             t_datanet_1 = time.time() - t_datanet_0
-            print("data prep and fp: ", t_datanet_1, file=sys.stderr)
+            print("data prep and fp: ", t_datanet_1)
             t_derand_0 = time.time()
 
             sets, set_edges, set_cardinality = decode_clique_final_speed(data_prime,(retdz["output"][0]), weight_factor =0.,draw=False, beam = 1)
 
             t_derand_1 = time.time() - t_derand_0
-            print("Derandomization time: ", t_derand_1, file=sys.stderr)
+            print("Derandomization time: ", t_derand_1)
 
             for j in range(num_graphs):
                 indices = (data.batch == j)
@@ -321,8 +225,8 @@ def evaluate_on_test_set(net, testdata):
                         bestedges[j] = set_edges[j].item()
 
         t_1 = time.time()-t_0
-        print("Current batch: ", count, file=sys.stderr)
-        print("Time so far: ", time.time()-t_0, file=sys.stderr)
+        print("Current batch: ", count)
+        print("Time so far: ", time.time()-t_0)
         gnn_sets[str(count)] = bestset
 
         gnn_nodes += [maxset]
@@ -333,7 +237,7 @@ def evaluate_on_test_set(net, testdata):
 
     t_1 = time.time()
     total_time = t_1 - t_start
-    print("Average time per graph: ", total_time/(len(testdata)), file=sys.stderr)
+    print("Average time per graph: ", total_time/(len(testdata)))
 
     #flatten output
     flat_list = [item for sublist in gnn_edges for item in sublist]
@@ -351,19 +255,132 @@ def evaluate_on_test_set(net, testdata):
 def compare_with_gurobi(erneur_sizes, gurobi_sizes):
     assert len(erneur_sizes) == len(gurobi_sizes)
     ratios = [erneur_sizes[i]/gurobi_sizes[i] for i in range(len(erneur_sizes))]
-    print(f"Mean ratio: {(np.array(ratios)).mean()} +/-  {(np.array(ratios)).std()}", file=sys.stderr)
     return ratios
 
-if __name__ == '__main__':
-    small_dataset, testdata_big = get_dataset_small_big(ALL_DATASET_NAMES[0])
-    traindata, valdata, testdata_norm = split_dataset_tvt(small_dataset)
-    net = train_model(small_dataset, traindata, valdata)
-    norm_erneur_sizes = evaluate_on_test_set(net, testdata_norm)
-    norm_gurobi_sizes = [data.clique_number for data in get_gurobi_ground_truth(testdata_norm)]
-    big_erneur_sizes = evaluate_on_test_set(net, testdata_big)
-    big_gurobi_sizes = [data.clique_number for data in get_gurobi_ground_truth(testdata_big)]
+def train_model(dataset, traindata, valdata, testdatas=None, penalty_coeff=4, reg_coeff=0):
+    if testdatas == None:
+        eval_test = False
+    else:
+        assert type(testdatas) is tuple
+        assert len(testdatas) == 2
+        eval_test = True
+        testdata_norm = testdatas[0]
+        testdata_big = testdatas[1]
 
-    print('normal')
-    compare_with_gurobi(norm_erneur_sizes, norm_gurobi_sizes)
-    print('big')
-    compare_with_gurobi(big_erneur_sizes, big_gurobi_sizes)
+    numlayers = 5
+    net = clique_MPNN(dataset, numlayers, 32, 32, 1)
+    device = get_device()
+    lr_decay_step_size = 5
+    lr_decay_factor = 0.95
+
+    epochs = 20
+
+    # sets the clique_MPNN in training mode
+    net.train()
+
+    retdict = {}
+    edge_drop_p = 0.0
+    edge_dropout_decay = 0.90
+
+    # this loops through all combinations of hyperparameters
+    batch_size = 32
+    learning_rate = 0.001
+    depth = 4
+    rand_seed = 66
+    hidden_1 = 64
+
+    if eval_test:
+        # get gurobi answers just to test ratio at every epoch
+        norm_gurobi_sizes = [data.clique_number for data in get_gurobi_ground_truth(testdata_norm)]
+        big_gurobi_sizes = [data.clique_number for data in get_gurobi_ground_truth(testdata_big)]
+
+    torch.manual_seed(rand_seed)
+
+    train_loader = DataLoader(traindata, batch_size, shuffle=True)
+    val_loader =  DataLoader(valdata, batch_size, shuffle=False)
+
+    receptive_field= numlayers + 1
+    val_losses = []
+    cliq_dists = []
+
+    #hidden_1 = 128
+    hidden_2 = 1
+
+    net = clique_MPNN(dataset,numlayers, hidden_1, hidden_2 ,1)
+    net.to(device).reset_parameters()
+    optimizer = Adam(net.parameters(), lr=learning_rate, weight_decay=0.00000)
+
+    for epoch in range(epochs):
+        totalretdict = {}
+        count=0
+        if epoch % 5 == 0:
+            edge_drop_p = edge_drop_p*edge_dropout_decay
+            print("Edge_dropout: ", edge_drop_p)
+
+        if epoch % 10 == 0:
+            penalty_coeff = penalty_coeff + 0.
+            print("Penalty_coefficient: ", penalty_coeff)
+
+        #learning rate schedule
+        if epoch % lr_decay_step_size == 0:
+            for param_group in optimizer.param_groups:
+                        param_group['lr'] = lr_decay_factor * param_group['lr']
+
+        #show currrent epoch and GPU utilizationss
+        print('Epoch: ', epoch)
+
+        net.train()
+        for data in train_loader:
+            count += 1
+            optimizer.zero_grad(),
+            data = data.to(device)
+            data_prime = get_diracs(data, 1, sparse = True, effective_volume_range=0.15, receptive_field = receptive_field)
+
+            data = data.to('cpu')
+            data_prime = data_prime.to(device)
+
+            retdict = net(data_prime, None, penalty_coeff) # this is where clique_MPNN.forward() is called
+
+            for key,val in retdict.items():
+                if "sequence" in val[1]:
+                    if key in totalretdict:
+                        totalretdict[key][0] += val[0].item()
+                    else:
+                        totalretdict[key] = [val[0].item(),val[1]]
+
+            if epoch > 2:
+                    retdict["loss"][0].backward()
+                    #reporter.report()
+
+                    torch.nn.utils.clip_grad_norm_(net.parameters(),1)
+                    optimizer.step()
+                    del(retdict)
+
+        # print progress at every epoch
+        # print(retdict['loss'][0])
+        if eval_test:
+            norm_erneur_sizes = evaluate_on_test_set(net, testdata_norm)
+            norm_ratios = compare_with_gurobi(norm_erneur_sizes, norm_gurobi_sizes)
+            norm_mean = (np.array(norm_ratios)).mean()
+            big_erneur_sizes = evaluate_on_test_set(net, testdata_big)
+            big_ratios = compare_with_gurobi(big_erneur_sizes, big_gurobi_sizes)
+            big_mean = (np.array(big_ratios)).mean()
+            print(norm_mean, big_mean, file=sys.stderr)
+
+        if epoch > -1:
+            for key,val in totalretdict.items():
+                if "sequence" in val[1]:
+                    val[0] = val[0]/(len(train_loader.dataset)/batch_size)
+            del data_prime
+
+    return net
+
+if __name__ == '__main__':
+    dataset_name = ALL_DATASET_NAMES[int(sys.argv[1])]
+    penalty_coeff = float(sys.argv[2])
+    reg_coeff = float(sys.argv[3])
+    print(f'running on {dataset_name}')
+    small_dataset, big_dataset = get_dataset_small_big(dataset_name)
+    traindata, valdata, testdata_norm = split_dataset_tvt(small_dataset)
+    testdata_big = big_dataset
+    net = train_model(small_dataset, traindata, valdata, testdatas=(testdata_norm, testdata_big))
