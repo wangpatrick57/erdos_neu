@@ -73,11 +73,12 @@ from torch_geometric.nn.norm.graph_size_norm import GraphSizeNorm
 from modules_and_utils import decode_clique_final, decode_clique_final_speed
 
 # ordered from smallest to biggest in terms of average node size of graphs
-ALL_DATASET_NAMES = ['IMDB-BINARY', 'ENZYMES', 'COLLAB', 'REDDIT-BINARY']
+ALL_DATASET_NAMES = ['IMDB-MULTI', 'IMDB-BINARY', 'ENZYMES', 'COLLAB', 'REDDIT-BINARY']
 
 # the inflection point of node size where we split "big" and "small" for each dataset name
 # check https://docs.google.com/spreadsheets/d/1e3rWa1f4L9ps8QpD3490XXpCaFpXke9UgzwrCOvnubw/edit?usp=sharing for node size progressions
 DATASET_NAME_SIZE_INFLECTION_POINTS = {
+    'IMDB-MULTI': 27,
     'IMDB-BINARY': 38,
     'ENZYMES': 57,
     'COLLAB': 133,
@@ -85,6 +86,7 @@ DATASET_NAME_SIZE_INFLECTION_POINTS = {
 }
 
 DATASET_NORM_SAMPLE_EVERY = {
+    'IMDB-MULTI': 1,
     'IMDB-BINARY': 1,
     'ENZYMES': 1,
     'COLLAB': 25, # 4516 total
@@ -92,6 +94,7 @@ DATASET_NORM_SAMPLE_EVERY = {
 }
 
 DATASET_BIG_SAMPLE_EVERY = {
+    'IMDB-MULTI': 1,
     'IMDB-BINARY': 1,
     'ENZYMES': 1,
     'COLLAB': 20, # 484 total
