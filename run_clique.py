@@ -72,6 +72,7 @@ from models import clique_MPNN
 from torch_geometric.nn.norm.graph_size_norm import GraphSizeNorm
 from modules_and_utils import decode_clique_final, decode_clique_final_speed
 
+# ordered from smallest to biggest in terms of average node size of graphs
 ALL_DATASET_NAMES = ['IMDB-BINARY', 'ENZYMES', 'COLLAB', 'REDDIT-BINARY']
 
 # the inflection point of node size where we split "big" and "small" for each dataset name
@@ -80,7 +81,21 @@ DATASET_NAME_SIZE_INFLECTION_POINTS = {
     'IMDB-BINARY': 38,
     'ENZYMES': 57,
     'COLLAB': 133,
-    'REDDIT-BINARY': 555
+    'REDDIT-BINARY': 555,
+}
+
+DATASET_NORM_SAMPLE_EVERY = {
+    'IMDB-BINARY': 1,
+    'ENZYMES': 1,
+    'COLLAB': 25, # 4516 total
+    'REDDIT-BINARY': 160, # 1649 total
+}
+
+DATASET_BIG_SAMPLE_EVERY = {
+    'IMDB-BINARY': 1,
+    'ENZYMES': 1,
+    'COLLAB': 20, # 484 total
+    'REDDIT-BINARY': 30, # 351 total
 }
 
 def get_device():
@@ -136,7 +151,8 @@ def split_dataset_tvt(dataset):
 
     return traindata, valdata, testdata
 
-def get_gurobi_ground_truth(testdata):
+def get_gurobi_ground_truth(testdata, sample_every=1):
+    testdata = testdata.index_select(range(0, len(testdata), sample_every))
     test_data_clique = []
 
     for data in testdata:
@@ -151,7 +167,8 @@ def get_gurobi_ground_truth(testdata):
 
     return test_data_clique
 
-def evaluate_on_test_set(net, testdata):
+def evaluate_on_test_set(net, testdata, sample_every=1):
+    testdata = testdata.index_select(range(0, len(testdata), sample_every))
     batch_size = 32
     test_loader = DataLoader(testdata, batch_size, shuffle=False)
     device = get_device()
@@ -209,13 +226,11 @@ def evaluate_on_test_set(net, testdata):
             retdz = net(data_prime)
 
             t_datanet_1 = time.time() - t_datanet_0
-            print("data prep and fp: ", t_datanet_1)
             t_derand_0 = time.time()
 
             sets, set_edges, set_cardinality = decode_clique_final_speed(data_prime,(retdz["output"][0]), weight_factor =0.,draw=False, beam = 1)
 
             t_derand_1 = time.time() - t_derand_0
-            print("Derandomization time: ", t_derand_1)
 
             for j in range(num_graphs):
                 indices = (data.batch == j)
@@ -262,10 +277,16 @@ def train_model(dataset, traindata, valdata, testdatas=None, penalty_coeff=4, re
         eval_test = False
     else:
         assert type(testdatas) is tuple
-        assert len(testdatas) == 2
+        assert len(testdatas) == 4
+        assert type(testdatas[0]) is TUDataset
+        assert type(testdatas[1]) is TUDataset
+        assert type(testdatas[2]) is int
+        assert type(testdatas[3]) is int
         eval_test = True
         testdata_norm = testdatas[0]
         testdata_big = testdatas[1]
+        norm_sample_every = testdatas[2]
+        big_sample_every = testdatas[3]
 
     numlayers = 5
     net = clique_MPNN(dataset, numlayers, 32, 32, 1)
@@ -291,8 +312,8 @@ def train_model(dataset, traindata, valdata, testdatas=None, penalty_coeff=4, re
 
     if eval_test:
         # get gurobi answers just to test ratio at every epoch
-        norm_gurobi_sizes = [data.clique_number for data in get_gurobi_ground_truth(testdata_norm)]
-        big_gurobi_sizes = [data.clique_number for data in get_gurobi_ground_truth(testdata_big)]
+        norm_gurobi_sizes = [data.clique_number for data in get_gurobi_ground_truth(testdata_norm, sample_every=norm_sample_every)]
+        big_gurobi_sizes = [data.clique_number for data in get_gurobi_ground_truth(testdata_big, sample_every=big_sample_every)]
 
     torch.manual_seed(rand_seed)
 
@@ -359,10 +380,10 @@ def train_model(dataset, traindata, valdata, testdatas=None, penalty_coeff=4, re
         # print progress at every epoch
         # print(retdict['loss'][0])
         if eval_test:
-            norm_erneur_sizes = evaluate_on_test_set(net, testdata_norm)
+            norm_erneur_sizes = evaluate_on_test_set(net, testdata_norm, sample_every=norm_sample_every)
             norm_ratios = compare_with_gurobi(norm_erneur_sizes, norm_gurobi_sizes)
             norm_mean = (np.array(norm_ratios)).mean()
-            big_erneur_sizes = evaluate_on_test_set(net, testdata_big)
+            big_erneur_sizes = evaluate_on_test_set(net, testdata_big, sample_every=big_sample_every)
             big_ratios = compare_with_gurobi(big_erneur_sizes, big_gurobi_sizes)
             big_mean = (np.array(big_ratios)).mean()
             print(norm_mean, big_mean, file=sys.stderr)
@@ -383,5 +404,4 @@ if __name__ == '__main__':
     small_dataset, big_dataset = get_dataset_small_big(dataset_name)
     traindata, valdata, testdata_norm = split_dataset_tvt(small_dataset)
     testdata_big = big_dataset
-    print('tdnb', len(testdata_norm), len(testdata_big))
-    net = train_model(small_dataset, traindata, valdata, testdatas=(testdata_norm, testdata_big), penalty_coeff=penalty_coeff, reg_coeff=reg_coeff)
+    net = train_model(small_dataset, traindata, valdata, testdatas=(testdata_norm, testdata_big, DATASET_NORM_SAMPLE_EVERY[dataset_name], DATASET_BIG_SAMPLE_EVERY[dataset_name]), penalty_coeff=penalty_coeff, reg_coeff=reg_coeff)
