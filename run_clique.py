@@ -159,7 +159,7 @@ def get_gurobi_ground_truth(testdata, sample_every=1):
         my_graph = to_networkx(Data(x=data.x, edge_index = data.edge_index)).to_undirected()
 
         start_time = time.time()
-        cliqno, _ = solve_gurobi_maxclique(my_graph, 500)
+        cliqno, _ = solve_gurobi_maxclique(my_graph)
         end_time = time.time()
 
         data.clique_number = cliqno
