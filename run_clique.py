@@ -82,9 +82,6 @@ def set_random_seeds():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def get_dataset(dataset_name):
-    return TUDataset(root='datasets/', name=dataset_name)
-
 def print_node_size_progression(dataset):
     node_sizes = []
 

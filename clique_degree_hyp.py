@@ -1,44 +1,50 @@
 #!/Users/patrickwang/opt/anaconda3/bin/python
 import sys
-from dataset_utils import get_dataset, ALL_DATASET_NAMES
+from dataset_utils import *
 from torch_geometric.utils import to_undirected, to_networkx
 from torch_geometric.data import Data
 from cut_utils import solve_gurobi_maxclique
 
-def get_gurobi_ground_truth(testdata, sample_every=1):
-    testdata = testdata.index_select(range(0, len(testdata), sample_every))
-    test_data_clique = []
-
-    for data in testdata:
-        my_graph = to_networkx(Data(x=data.x, edge_index = data.edge_index)).to_undirected()
-
-        start_time = time.time()
-        cliqno, nodes = solve_gurobi_maxclique(my_graph)
-        end_time = time.time()
-
-        data.clique_number = cliqno
-        test_data_clique.append(data)
-
-    return test_data_clique
-
 def check_highest_degree_max_clique(graph):
-    highest_deg_node = sorted(graph.degree(), key=(lambda data : (-data[1], data[0])))[0][0]
+    nodes_sorted_by_deg = sorted(graph.degree(), key=(lambda data : (-data[1], data[0])))
+
+    if len(nodes_sorted_by_deg) == 0:
+        return None
+
+    highest_deg_node = nodes_sorted_by_deg[0][0]
     cliqno, nodes = solve_gurobi_maxclique(graph)
     return nodes[highest_deg_node] == 1.0
 
-def check_hdmc_on_dataset(dataset):
+def check_hdmc_on_dataset(dataset, progressive=False, stop_at=None):
     num_hdmc = 0
+    num_not_hdmc = 0
+    graphs = graphs_from_dataset(dataset)
 
-    for data in dataset:
-        my_graph = to_networkx(Data(x=data.x, edge_index = data.edge_index)).to_undirected()
+    if progressive:
+        graphs.sort(key=(lambda graph: graph.number_of_nodes()))
 
-        if check_highest_degree_max_clique(my_graph):
+    for graph in graphs:
+        res = check_highest_degree_max_clique(graph)
+
+        if res == True:
             num_hdmc += 1
+        elif res == False:
+            num_not_hdmc += 1
+        else:
+            assert res == None
 
-    return num_hdmc
+        if progressive:
+            print(f'{num_hdmc} {num_hdmc + num_not_hdmc}')
+
+        if stop_at != None and num_hdmc + num_not_hdmc >= stop_at:
+            break
+
+    return num_hdmc, num_not_hdmc
 
 if __name__ == '__main__':
-    dataset_name = ALL_DATASET_NAMES[int(sys.argv[1])]
+    dataset_name = sys.argv[1]
+    stop_at = int(sys.argv[2])
     dataset = get_dataset(dataset_name)
-    num_hdmc = check_hdmc_on_dataset(dataset)
-    print(f'{num_hdmc} / {len(dataset)} graphs with the highest degree node in the maximum clique')
+    progressive = is_big(dataset_name)
+    num_hdmc, num_not_hdmc = check_hdmc_on_dataset(dataset, progressive=progressive, stop_at=stop_at)
+    print(f'{dataset_name}: {num_hdmc} / {num_not_hdmc + num_hdmc}')
