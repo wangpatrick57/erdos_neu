@@ -42,7 +42,15 @@ from torch_geometric.data import Batch
 from torch_scatter import scatter_min, scatter_max, scatter_add, scatter_mean
 from torch import autograd
 from torch_geometric.utils import to_dense_batch, to_dense_adj
-from torch_geometric.utils import softmax, add_self_loops, remove_self_loops, segregate_self_loops, remove_isolated_nodes, contains_isolated_nodes, add_remaining_self_loops
+from torch_geometric.utils import (
+    softmax,
+    add_self_loops,
+    remove_self_loops,
+    segregate_self_loops,
+    remove_isolated_nodes,
+    contains_isolated_nodes,
+    add_remaining_self_loops,
+)
 from torch_geometric.utils import dropout_adj, to_undirected, to_networkx
 from torch_geometric.utils import is_undirected
 from cut_utils import get_diracs
@@ -65,7 +73,7 @@ import visdom
 from visdom import Visdom
 import numpy as np
 import matplotlib.pyplot as plt
-from  cut_utils import solve_gurobi_maxclique
+from cut_utils import solve_gurobi_maxclique
 import gurobipy as gp
 from gurobipy import GRB
 from models import clique_MPNN
@@ -73,8 +81,10 @@ from torch_geometric.nn.norm.graph_size_norm import GraphSizeNorm
 from modules_and_utils import decode_clique_final, decode_clique_final_speed
 from dataset_utils import *
 
+
 def get_device():
-    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 def set_random_seeds():
     torch.manual_seed(1)
@@ -82,15 +92,19 @@ def set_random_seeds():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+
 def print_node_size_progression(dataset):
     node_sizes = []
 
     for data in dataset:
-        my_graph = to_networkx(Data(x=data.x, edge_index = data.edge_index)).to_undirected()
+        my_graph = to_networkx(
+            Data(x=data.x, edge_index=data.edge_index)
+        ).to_undirected()
         node_sizes.append(my_graph.number_of_nodes())
 
     node_sizes.sort()
-    print('\n'.join([f'{i} {size}' for i, size in enumerate(node_sizes)]))
+    print("\n".join([f"{i} {size}" for i, size in enumerate(node_sizes)]))
+
 
 def get_dataset_small_big(dataset_name):
     dataset = get_dataset(dataset_name)
@@ -99,7 +113,9 @@ def get_dataset_small_big(dataset_name):
     small_indices = []
 
     for i, data in enumerate(dataset):
-        my_graph = to_networkx(Data(x=data.x, edge_index = data.edge_index)).to_undirected()
+        my_graph = to_networkx(
+            Data(x=data.x, edge_index=data.edge_index)
+        ).to_undirected()
         num_nodes = my_graph.number_of_nodes()
 
         if num_nodes >= inf_point:
@@ -112,23 +128,27 @@ def get_dataset_small_big(dataset_name):
 
     return small_dataset, big_dataset
 
+
 def split_dataset_tvt(dataset):
-    num_trainpoints = int(np.floor(0.6*len(dataset)))
-    num_valpoints = int(np.floor(0.2*len(dataset)))
+    num_trainpoints = int(np.floor(0.6 * len(dataset)))
+    num_valpoints = int(np.floor(0.2 * len(dataset)))
     num_testpoints = len(dataset) - (num_trainpoints + num_valpoints)
 
-    traindata= dataset[0:num_trainpoints]
-    valdata = dataset[num_trainpoints:num_trainpoints + num_valpoints]
-    testdata = dataset[num_trainpoints + num_valpoints:]
+    traindata = dataset[0:num_trainpoints]
+    valdata = dataset[num_trainpoints : num_trainpoints + num_valpoints]
+    testdata = dataset[num_trainpoints + num_valpoints :]
 
     return traindata, valdata, testdata
+
 
 def get_gurobi_ground_truth(testdata, sample_every=1):
     testdata = testdata.index_select(range(0, len(testdata), sample_every))
     test_data_clique = []
 
     for data in testdata:
-        my_graph = to_networkx(Data(x=data.x, edge_index = data.edge_index)).to_undirected()
+        my_graph = to_networkx(
+            Data(x=data.x, edge_index=data.edge_index)
+        ).to_undirected()
 
         start_time = time.time()
         cliqno, _ = solve_gurobi_maxclique(my_graph)
@@ -139,6 +159,7 @@ def get_gurobi_ground_truth(testdata, sample_every=1):
 
     return test_data_clique
 
+
 def evaluate_on_test_set(net, testdata, sample_every=1, known_degree_decode=False):
     testdata = testdata.index_select(range(0, len(testdata), sample_every))
     batch_size = 32
@@ -147,14 +168,14 @@ def evaluate_on_test_set(net, testdata, sample_every=1, known_degree_decode=Fals
     net.to(device)
     count = 1
 
-    #Evaluation on test set
+    # Evaluation on test set
     net.eval()
 
     gnn_nodes = []
     gnn_edges = []
     gnn_sets = {}
 
-    #set number of samples according to your execution time, for 10 samples
+    # set number of samples according to your execution time, for 10 samples
     max_samples = 8
 
     gnn_times = []
@@ -164,7 +185,7 @@ def evaluate_on_test_set(net, testdata, sample_every=1, known_degree_decode=Fals
 
     for data in test_loader:
         total_nodes = 0
-        num_graphs = data.batch.max().item()+1
+        num_graphs = data.batch.max().item() + 1
         bestset = {}
         bestedges = np.zeros((num_graphs))
         maxset = np.zeros((num_graphs))
@@ -172,31 +193,41 @@ def evaluate_on_test_set(net, testdata, sample_every=1, known_degree_decode=Fals
         total_samples = []
 
         for graph in range(num_graphs):
-            curr_inds = (data.batch==graph)
+            curr_inds = data.batch == graph
             g_size = curr_inds.sum().item()
             total_nodes += g_size
             if max_samples <= g_size:
-                samples = np.random.choice(curr_inds.sum().item(),max_samples, replace=False)
+                samples = np.random.choice(
+                    curr_inds.sum().item(), max_samples, replace=False
+                )
             else:
-                samples = np.random.choice(curr_inds.sum().item(),max_samples, replace=True)
+                samples = np.random.choice(
+                    curr_inds.sum().item(), max_samples, replace=True
+                )
 
-            total_samples +=[samples]
+            total_samples += [samples]
 
         data = data.to(device)
         t_0 = time.time()
 
         for k in range(num_samples):
             t_datanet_0 = time.time()
-            data_prime = get_diracs(data.to(device), 1, sparse = True, effective_volume_range=0.15, receptive_field = 7)
+            data_prime = get_diracs(
+                data.to(device),
+                1,
+                sparse=True,
+                effective_volume_range=0.15,
+                receptive_field=7,
+            )
 
             initial_values = data_prime.x.detach()
             data_prime.x = torch.zeros_like(data_prime.x)
             g_offset = 0
             for graph in range(num_graphs):
-                curr_inds = (data_prime.batch==graph)
+                curr_inds = data_prime.batch == graph
                 g_size = curr_inds.sum().item()
                 graph_x = data_prime.x[curr_inds]
-                data_prime.x[total_samples[graph][k] + g_offset]=1.
+                data_prime.x[total_samples[graph][k] + g_offset] = 1.0
                 g_offset += g_size
 
             retdz = net(data_prime)
@@ -204,20 +235,27 @@ def evaluate_on_test_set(net, testdata, sample_every=1, known_degree_decode=Fals
             t_datanet_1 = time.time() - t_datanet_0
             t_derand_0 = time.time()
 
-            sets, set_edges, set_cardinality = decode_clique_final_speed(data_prime,(retdz["output"][0]), weight_factor =0.,draw=False, beam = 1, known_degree_decode=known_degree_decode)
+            sets, set_edges, set_cardinality = decode_clique_final_speed(
+                data_prime,
+                (retdz["output"][0]),
+                weight_factor=0.0,
+                draw=False,
+                beam=1,
+                known_degree_decode=known_degree_decode,
+            )
 
             t_derand_1 = time.time() - t_derand_0
 
             for j in range(num_graphs):
-                indices = (data.batch == j)
-                if (set_cardinality[j]>maxset[j]):
-                        maxset[j] = set_cardinality[j].item()
-                        bestset[str(j)] = sets[indices].cpu()
-                        bestedges[j] = set_edges[j].item()
+                indices = data.batch == j
+                if set_cardinality[j] > maxset[j]:
+                    maxset[j] = set_cardinality[j].item()
+                    bestset[str(j)] = sets[indices].cpu()
+                    bestedges[j] = set_edges[j].item()
 
-        t_1 = time.time()-t_0
+        t_1 = time.time() - t_0
         print("Current batch: ", count)
-        print("Time so far: ", time.time()-t_0)
+        print("Time so far: ", time.time() - t_0)
         gnn_sets[str(count)] = bestset
 
         gnn_nodes += [maxset]
@@ -229,27 +267,37 @@ def evaluate_on_test_set(net, testdata, sample_every=1, known_degree_decode=Fals
 
     t_1 = time.time()
     total_time = t_1 - t_start
-    print("Average time per graph: ", total_time/(len(testdata)))
+    print("Average time per graph: ", total_time / (len(testdata)))
 
-    #flatten output
+    # flatten output
     flat_list = [item for sublist in gnn_edges for item in sublist]
     for k in range(len(flat_list)):
         flat_list[k] = flat_list[k].item()
-    gnn_edges = (flat_list)
+    gnn_edges = flat_list
 
     flat_list = [item for sublist in gnn_nodes for item in sublist]
     for k in range(len(flat_list)):
         flat_list[k] = flat_list[k].item()
-    gnn_nodes = (flat_list)
+    gnn_nodes = flat_list
 
     return gnn_nodes
 
+
 def compare_with_gurobi(erneur_sizes, gurobi_sizes):
     assert len(erneur_sizes) == len(gurobi_sizes)
-    ratios = [erneur_sizes[i]/gurobi_sizes[i] for i in range(len(erneur_sizes))]
+    ratios = [erneur_sizes[i] / gurobi_sizes[i] for i in range(len(erneur_sizes))]
     return ratios
 
-def train_model(dataset, traindata, valdata, testdatas=None, penalty_coeff=4, reg_coeff=0, known_degree_decode=False):
+
+def train_model(
+    dataset,
+    traindata,
+    valdata,
+    testdatas=None,
+    penalty_coeff=4,
+    reg_coeff=0,
+    known_degree_decode=False,
+):
     if testdatas == None:
         eval_test = False
     else:
@@ -289,93 +337,122 @@ def train_model(dataset, traindata, valdata, testdatas=None, penalty_coeff=4, re
 
     if eval_test:
         # get gurobi answers just to test ratio at every epoch
-        norm_gurobi_sizes = [data.clique_number for data in get_gurobi_ground_truth(testdata_norm, sample_every=norm_sample_every)]
-        big_gurobi_sizes = [data.clique_number for data in get_gurobi_ground_truth(testdata_big, sample_every=big_sample_every)]
+        norm_gurobi_sizes = [
+            data.clique_number
+            for data in get_gurobi_ground_truth(
+                testdata_norm, sample_every=norm_sample_every
+            )
+        ]
+        big_gurobi_sizes = [
+            data.clique_number
+            for data in get_gurobi_ground_truth(
+                testdata_big, sample_every=big_sample_every
+            )
+        ]
 
     torch.manual_seed(rand_seed)
 
     train_loader = DataLoader(traindata, batch_size, shuffle=True)
-    val_loader =  DataLoader(valdata, batch_size, shuffle=False)
+    val_loader = DataLoader(valdata, batch_size, shuffle=False)
 
-    receptive_field= numlayers + 1
+    receptive_field = numlayers + 1
     val_losses = []
     cliq_dists = []
 
-    #hidden_1 = 128
+    # hidden_1 = 128
     hidden_2 = 1
 
-    net = clique_MPNN(dataset,numlayers, hidden_1, hidden_2 ,1)
+    net = clique_MPNN(dataset, numlayers, hidden_1, hidden_2, 1)
     net.to(device).reset_parameters()
     optimizer = Adam(net.parameters(), lr=learning_rate, weight_decay=0.00000)
 
     for epoch in range(epochs):
         totalretdict = {}
-        count=0
+        count = 0
         if epoch % 5 == 0:
-            edge_drop_p = edge_drop_p*edge_dropout_decay
+            edge_drop_p = edge_drop_p * edge_dropout_decay
             print("Edge_dropout: ", edge_drop_p)
 
         if epoch % 10 == 0:
-            penalty_coeff = penalty_coeff + 0.
+            penalty_coeff = penalty_coeff + 0.0
             print("Penalty_coefficient: ", penalty_coeff)
 
-        #learning rate schedule
+        # learning rate schedule
         if epoch % lr_decay_step_size == 0:
             for param_group in optimizer.param_groups:
-                        param_group['lr'] = lr_decay_factor * param_group['lr']
+                param_group["lr"] = lr_decay_factor * param_group["lr"]
 
-        #show currrent epoch and GPU utilizationss
-        print('Epoch: ', epoch)
+        # show currrent epoch and GPU utilizationss
+        print("Epoch: ", epoch)
 
         net.train()
         for data in train_loader:
             count += 1
             optimizer.zero_grad(),
             data = data.to(device)
-            data_prime = get_diracs(data, 1, sparse = True, effective_volume_range=0.15, receptive_field = receptive_field)
+            data_prime = get_diracs(
+                data,
+                1,
+                sparse=True,
+                effective_volume_range=0.15,
+                receptive_field=receptive_field,
+            )
 
-            data = data.to('cpu')
+            data = data.to("cpu")
             data_prime = data_prime.to(device)
 
-            retdict = net(data_prime, None, penalty_coeff, reg_coeff) # this is where clique_MPNN.forward() is called
+            retdict = net(
+                data_prime, None, penalty_coeff, reg_coeff
+            )  # this is where clique_MPNN.forward() is called
 
-            for key,val in retdict.items():
+            for key, val in retdict.items():
                 if "sequence" in val[1]:
                     if key in totalretdict:
                         totalretdict[key][0] += val[0].item()
                     else:
-                        totalretdict[key] = [val[0].item(),val[1]]
+                        totalretdict[key] = [val[0].item(), val[1]]
 
             if epoch > 2:
-                    retdict["loss"][0].backward()
-                    #reporter.report()
+                retdict["loss"][0].backward()
+                # reporter.report()
 
-                    torch.nn.utils.clip_grad_norm_(net.parameters(),1)
-                    optimizer.step()
-                    del(retdict)
+                torch.nn.utils.clip_grad_norm_(net.parameters(), 1)
+                optimizer.step()
+                del retdict
 
         # print progress at every epoch
         # print('loss:', retdict['loss'][0])
-        print('before eval test')
+        print("before eval test")
 
         if eval_test:
-            norm_erneur_sizes = evaluate_on_test_set(net, testdata_norm, sample_every=norm_sample_every, known_degree_decode=known_degree_decode)
+            norm_erneur_sizes = evaluate_on_test_set(
+                net,
+                testdata_norm,
+                sample_every=norm_sample_every,
+                known_degree_decode=known_degree_decode,
+            )
             norm_ratios = compare_with_gurobi(norm_erneur_sizes, norm_gurobi_sizes)
             norm_mean = (np.array(norm_ratios)).mean()
-            big_erneur_sizes = evaluate_on_test_set(net, testdata_big, sample_every=big_sample_every, known_degree_decode=known_degree_decode)
+            big_erneur_sizes = evaluate_on_test_set(
+                net,
+                testdata_big,
+                sample_every=big_sample_every,
+                known_degree_decode=known_degree_decode,
+            )
             big_ratios = compare_with_gurobi(big_erneur_sizes, big_gurobi_sizes)
             big_mean = (np.array(big_ratios)).mean()
             print(norm_mean, big_mean, file=sys.stderr)
 
         if epoch > -1:
-            for key,val in totalretdict.items():
+            for key, val in totalretdict.items():
                 if "sequence" in val[1]:
-                    val[0] = val[0]/(len(train_loader.dataset)/batch_size)
+                    val[0] = val[0] / (len(train_loader.dataset) / batch_size)
             del data_prime
 
     return net
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     dataset_name = sys.argv[1]
     penalty_coeff = float(sys.argv[2])
     reg_coeff = float(sys.argv[3])
@@ -384,4 +461,17 @@ if __name__ == '__main__':
     small_dataset, big_dataset = get_dataset_small_big(dataset_name)
     traindata, valdata, testdata_norm = split_dataset_tvt(small_dataset)
     testdata_big = big_dataset
-    net = train_model(small_dataset, traindata, valdata, testdatas=(testdata_norm, testdata_big, DATASET_NORM_SAMPLE_EVERY[dataset_name], DATASET_BIG_SAMPLE_EVERY[dataset_name]), penalty_coeff=penalty_coeff, reg_coeff=reg_coeff, known_degree_decode=known_degree_decode)
+    net = train_model(
+        small_dataset,
+        traindata,
+        valdata,
+        testdatas=(
+            testdata_norm,
+            testdata_big,
+            DATASET_NORM_SAMPLE_EVERY[dataset_name],
+            DATASET_BIG_SAMPLE_EVERY[dataset_name],
+        ),
+        penalty_coeff=penalty_coeff,
+        reg_coeff=reg_coeff,
+        known_degree_decode=known_degree_decode,
+    )
