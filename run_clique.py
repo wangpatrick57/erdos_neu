@@ -139,7 +139,7 @@ def get_gurobi_ground_truth(testdata, sample_every=1):
 
     return test_data_clique
 
-def evaluate_on_test_set(net, testdata, sample_every=1):
+def evaluate_on_test_set(net, testdata, sample_every=1, known_degree_decode=False):
     testdata = testdata.index_select(range(0, len(testdata), sample_every))
     batch_size = 32
     test_loader = DataLoader(testdata, batch_size, shuffle=False)
@@ -158,19 +158,23 @@ def evaluate_on_test_set(net, testdata, sample_every=1):
     max_samples = 8
 
     gnn_times = []
+    gnn_total_nodes = []
     num_samples = max_samples
     t_start = time.time()
 
     for data in test_loader:
+        total_nodes = 0
         num_graphs = data.batch.max().item()+1
         bestset = {}
         bestedges = np.zeros((num_graphs))
         maxset = np.zeros((num_graphs))
 
         total_samples = []
+
         for graph in range(num_graphs):
             curr_inds = (data.batch==graph)
             g_size = curr_inds.sum().item()
+            total_nodes += g_size
             if max_samples <= g_size:
                 samples = np.random.choice(curr_inds.sum().item(),max_samples, replace=False)
             else:
@@ -200,7 +204,7 @@ def evaluate_on_test_set(net, testdata, sample_every=1):
             t_datanet_1 = time.time() - t_datanet_0
             t_derand_0 = time.time()
 
-            sets, set_edges, set_cardinality = decode_clique_final_speed(data_prime,(retdz["output"][0]), weight_factor =0.,draw=False, beam = 1)
+            sets, set_edges, set_cardinality = decode_clique_final_speed(data_prime,(retdz["output"][0]), weight_factor =0.,draw=False, beam = 1, known_degree_decode=known_degree_decode)
 
             t_derand_1 = time.time() - t_derand_0
 
@@ -219,6 +223,7 @@ def evaluate_on_test_set(net, testdata, sample_every=1):
         gnn_nodes += [maxset]
         gnn_edges += [bestedges]
         gnn_times += [t_1]
+        gnn_total_nodes += [total_nodes]
 
         count += 1
 
@@ -244,7 +249,7 @@ def compare_with_gurobi(erneur_sizes, gurobi_sizes):
     ratios = [erneur_sizes[i]/gurobi_sizes[i] for i in range(len(erneur_sizes))]
     return ratios
 
-def train_model(dataset, traindata, valdata, testdatas=None, penalty_coeff=4, reg_coeff=0):
+def train_model(dataset, traindata, valdata, testdatas=None, penalty_coeff=4, reg_coeff=0, known_degree_decode=False):
     if testdatas == None:
         eval_test = False
     else:
@@ -350,12 +355,14 @@ def train_model(dataset, traindata, valdata, testdatas=None, penalty_coeff=4, re
                     del(retdict)
 
         # print progress at every epoch
-        # print(retdict['loss'][0])
+        # print('loss:', retdict['loss'][0])
+        print('before eval test')
+
         if eval_test:
-            norm_erneur_sizes = evaluate_on_test_set(net, testdata_norm, sample_every=norm_sample_every)
+            norm_erneur_sizes = evaluate_on_test_set(net, testdata_norm, sample_every=norm_sample_every, known_degree_decode=known_degree_decode)
             norm_ratios = compare_with_gurobi(norm_erneur_sizes, norm_gurobi_sizes)
             norm_mean = (np.array(norm_ratios)).mean()
-            big_erneur_sizes = evaluate_on_test_set(net, testdata_big, sample_every=big_sample_every)
+            big_erneur_sizes = evaluate_on_test_set(net, testdata_big, sample_every=big_sample_every, known_degree_decode=known_degree_decode)
             big_ratios = compare_with_gurobi(big_erneur_sizes, big_gurobi_sizes)
             big_mean = (np.array(big_ratios)).mean()
             print(norm_mean, big_mean, file=sys.stderr)
@@ -369,11 +376,12 @@ def train_model(dataset, traindata, valdata, testdatas=None, penalty_coeff=4, re
     return net
 
 if __name__ == '__main__':
-    dataset_name = ALL_DATASET_NAMES[int(sys.argv[1])]
+    dataset_name = sys.argv[1]
     penalty_coeff = float(sys.argv[2])
     reg_coeff = float(sys.argv[3])
-    print(f'running on {dataset_name}', file=sys.stderr)
+    known_degree_decode = bool(int(sys.argv[4]))
+
     small_dataset, big_dataset = get_dataset_small_big(dataset_name)
     traindata, valdata, testdata_norm = split_dataset_tvt(small_dataset)
     testdata_big = big_dataset
-    net = train_model(small_dataset, traindata, valdata, testdatas=(testdata_norm, testdata_big, DATASET_NORM_SAMPLE_EVERY[dataset_name], DATASET_BIG_SAMPLE_EVERY[dataset_name]), penalty_coeff=penalty_coeff, reg_coeff=reg_coeff)
+    net = train_model(small_dataset, traindata, valdata, testdatas=(testdata_norm, testdata_big, DATASET_NORM_SAMPLE_EVERY[dataset_name], DATASET_BIG_SAMPLE_EVERY[dataset_name]), penalty_coeff=penalty_coeff, reg_coeff=reg_coeff, known_degree_decode=known_degree_decode)

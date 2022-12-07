@@ -25,7 +25,7 @@ from torch.nn import Sequential as Seq, Linear, ReLU, LeakyReLU
 from torch_geometric.nn import MessagePassing
 from torch.nn import Linear, Sequential, ReLU, BatchNorm1d as BN
 #from torch_geometric.utils import scatter_
-from torch_geometric.data import Batch 
+from torch_geometric.data import Batch
 from torch_scatter import scatter_min, scatter_max, scatter_add, scatter_mean
 from torch import autograd
 from torch_geometric.utils import softmax, add_self_loops, remove_self_loops, segregate_self_loops, remove_isolated_nodes, contains_isolated_nodes, add_remaining_self_loops
@@ -142,13 +142,13 @@ def derandomize_cut(data, probabilities, target, elasticity,  draw=False):
     row, col = data.edge_index
     sets = probabilities.detach()
     deg = degree(row)
-    no_loop_index,_ = remove_self_loops(data.edge_index)        
+    no_loop_index,_ = remove_self_loops(data.edge_index)
     no_loop_row, no_loop_col = no_loop_index
     total_index = 0
 
     for graph in range(data.batch.max().item()+1):
          exp_cut = scatter_add(sets*deg, data.batch.cuda(), 0) - scatter_add((sets[row]*sets[col]), data.batch[row].cuda(), 0)
-         num_nodes = (data.batch==graph).sum().item()            
+         num_nodes = (data.batch==graph).sum().item()
          graph_set = sets[data.batch==graph].detach()
          sorted_indices = torch.argsort(graph_set, descending=True)
          mark_edges = (data.batch[row] == graph)
@@ -174,16 +174,16 @@ def derandomize_cut(data, probabilities, target, elasticity,  draw=False):
                     sets[ind_i] = 0
              else:
                 sets[ind_i] = 1
-         if draw: 
+         if draw:
              dirac = data.locations[graph].item() - total_index
-             f1 = plt.figure(graph,figsize=(16,9)) 
+             f1 = plt.figure(graph,figsize=(16,9))
              ax1 = f1.add_subplot(121)
              g1,g2 = drawGraphFromData(data.to('cpu'), graph, vals=sets.cpu(), dense=False,seed=dirac, nodecolor=True,edgecolor=False,seedhops=True,hoplabels=True,binarycut=True)
              ax2 = f1.add_subplot(122)
              g1,g2 = drawGraphFromData(data.to('cpu'), graph, vals=probabilities.cpu(), dense=False,seed=dirac, nodecolor=True,edgecolor=False,seedhops=True,hoplabels=True,binarycut=True)
 
          total_index += num_nodes
-         derand_cut = scatter_add(sets*deg, data.batch, 0) - scatter_add((sets[row]*sets[col]), data.batch[row], 0)         
+         derand_cut = scatter_add(sets*deg, data.batch, 0) - scatter_add((sets[row]*sets[col]), data.batch[row], 0)
     return sets
 
 
@@ -192,7 +192,7 @@ def get_diracs(data, N , n_diracs = 1,  sparse = False, flat = False, replace = 
 
     if not sparse:
         graphcount =data.num_nodes #number of graphs in data/batch object
-        totalnodecount = data.x.shape[1] #number of total nodes for each graph 
+        totalnodecount = data.x.shape[1] #number of total nodes for each graph
         actualnodecount = 0 #cumulative number of nodes
         diracmatrix= torch.zeros((graphcount,totalnodecount,N),device=device) #matrix with dirac pulses
 
@@ -205,28 +205,28 @@ def get_diracs(data, N , n_diracs = 1,  sparse = False, flat = False, replace = 
             node_sample= node_distribution.sample(sample_shape=(N,))
             node_sample= torch.cat((node_sample,torch.zeros((N,totalnodecount-node_sample.shape[1]),device=device)),-1) #concat zeros to fit dataset shape
             diracmatrix[k,:]= torch.transpose(node_sample,dim0=-1,dim1=-2) #add everything to the final matrix
-            
+
         return diracmatrix
-    
+
     else:
             if not is_undirected(data.edge_index):
                 data.edge_index = to_undirected(data.edge_index)
-                
+
             original_batch_index = data.batch
             original_edge_index = add_remaining_self_loops(data.edge_index, num_nodes = data.batch.shape[0])[0]
             batch_index = original_batch_index
-            
+
             graphcount = data.num_graphs
             batch_prime = torch.zeros(0,device=device).long()
-            
+
             r,c = original_edge_index
-            
-            
+
+
             global_offset = 0
             all_nodecounts = scatter_add(torch.ones_like(batch_index,device=device), batch_index,0)
             recfield_vols = torch.zeros(graphcount,device=device)
             total_vols = torch.zeros(graphcount,device=device)
-            
+
             for j in range(n_diracs):
                 diracmatrix = torch.zeros(0,device=device)
                 locationmatrix = torch.zeros(0,device=device).long()
@@ -236,7 +236,7 @@ def get_diracs(data, N , n_diracs = 1,  sparse = False, flat = False, replace = 
                     if graph_nodes==0:
                         print("all nodecounts: ", all_nodecounts)
                     graph_edges = (batch_index[r]==k)
-                    graph_edge_index = original_edge_index[:,graph_edges]-global_offset           
+                    graph_edge_index = original_edge_index[:,graph_edges]-global_offset
                     gr, gc = graph_edge_index
 
 
@@ -255,7 +255,7 @@ def get_diracs(data, N , n_diracs = 1,  sparse = False, flat = False, replace = 
                     total_vols[k] = total_volume
                     recfield_vols[k] = recfield_volume
                     #if receptive field volume is less than x% of total volume, resample
-                    for iteration in range(max_iterations):  
+                    for iteration in range(max_iterations):
                         randInt = np.random.choice(range(graph_nodes), N, replace = replace)
                         node_sample = torch.zeros(N*graph_nodes,device=device)
                         offs  = torch.arange(N, device=device)*graph_nodes
@@ -283,13 +283,13 @@ def get_diracs(data, N , n_diracs = 1,  sparse = False, flat = False, replace = 
                 return Batch(batch = batch_index, x = diracmatrix, edge_index = original_edge_index,
                              y = data.y, locations = locationmatrix, volume_range = volume_range, recfield_vol = recfield_vols, total_vol = total_vols)
 
-            
-#slow version     
+
+#slow version
 def decode_clique_final(data, probabilities, draw=False, weight_factor = 0.0, clique_number_bounds = None ,fig = None, device = 'cpu'):
     row, col = data.edge_index
     sets = probabilities.detach().unsqueeze(-1)
     batch = data.batch
-    no_loop_index,_ = remove_self_loops(data.edge_index)        
+    no_loop_index,_ = remove_self_loops(data.edge_index)
     no_loop_row, no_loop_col = no_loop_index
     num_graphs = batch.max().item() + 1
     total_index = 0
@@ -304,16 +304,16 @@ def decode_clique_final(data, probabilities, draw=False, weight_factor = 0.0, cl
         sorted_inds = torch.argsort(graph_probs.squeeze(-1), descending=True)
         pairwise_prodsums = torch.zeros(1, device = device)
         pairwise_prodsums = (torch.conv1d(graph_probs.unsqueeze(-1), graph_probs.unsqueeze(-1))).sum()/2
-        self_sums = (graph_probs*graph_probs).sum()       
+        self_sums = (graph_probs*graph_probs).sum()
         num_nodes = batch_graph.float().sum().item()
-   
+
         current_set_cardinality = 0
-        
+
         for node in range(int(num_nodes)):
             ind_i = total_index + sorted_inds[node]
             graph_probs_0 = sets[batch_graph].detach()
             graph_probs_1 = sets[batch_graph].detach()
-            
+
             graph_probs_0[sorted_inds[node]] = 0
             graph_probs_1[sorted_inds[node]] = 1
 
@@ -336,7 +336,7 @@ def decode_clique_final(data, probabilities, draw=False, weight_factor = 0.0, cl
             expected_clique_weight_1 = (pairwise_prodsums_1 - self_sums_1)
             clique_dist_1 = weight_factor* 0.5*(expected_clique_weight_1 - expected_weight_G_1)-expected_weight_G_1
 
-            if clique_dist_0 >= clique_dist_1: 
+            if clique_dist_0 >= clique_dist_1:
                 decided = (graph_probs_1==1).float()
                 current_set_cardinality = decided.sum().item()
                 current_set_max_edges = (current_set_cardinality*(current_set_cardinality-1))/2
@@ -346,23 +346,23 @@ def decode_clique_final(data, probabilities, draw=False, weight_factor = 0.0, cl
                     sets[ind_i] = 0 #IF NOT A CLIQUE
                 else:
                     sets[ind_i] = 1 #IF A CLIQUE
-                    
+
 
             else:
                    sets[ind_i] = 0
 
-        if draw: 
+        if draw:
             dirac = data.locations[graph].item() - total_index
             if fig is None:
-                 f1 = plt.figure(graph,figsize=(16,9)) 
+                 f1 = plt.figure(graph,figsize=(16,9))
             else:
                  f1 = fig
             ax1 = f1.add_subplot(121)
             g1,g2 = drawGraphFromData(data.to('cpu'), graph, vals=sets.squeeze(-1).detach().cpu(), dense=False,seed=dirac, nodecolor=True,edgecolor=False,seedhops=True,hoplabels=True,binarycut=False)
             ax2 = f1.add_subplot(122)
-            g1,g2 = drawGraphFromData(data.to('cpu'), graph, vals=probabilities.detach().cpu(), dense=False,seed=dirac, nodecolor=True,edgecolor=False,seedhops=True,hoplabels=True,binarycut=False, clique = True)             
+            g1,g2 = drawGraphFromData(data.to('cpu'), graph, vals=probabilities.detach().cpu(), dense=False,seed=dirac, nodecolor=True,edgecolor=False,seedhops=True,hoplabels=True,binarycut=False, clique = True)
         total_index += num_nodes
-        
+
 
     expected_weight_G = scatter_add(sets[no_loop_col]*sets[no_loop_row], batch[no_loop_row], 0, dim_size = num_graphs)
     set_cardinality = scatter_add(sets, batch, 0 , dim_size = num_graphs)
@@ -370,17 +370,16 @@ def decode_clique_final(data, probabilities, draw=False, weight_factor = 0.0, cl
 
 
 #fast version
-def decode_clique_final_speed(data, probabilities, draw=False, weight_factor = 0.35, clique_number_bounds = None ,fig = None, device = 'cpu', beam = 1):
-       
+def decode_clique_final_speed(data, probabilities, draw=False, weight_factor = 0.35, clique_number_bounds = None ,fig = None, device = 'cpu', beam = 1, known_degree_decode=False):
     row, col = data.edge_index
     sets = probabilities.detach().unsqueeze(-1)
     blank_sets = torch.zeros_like(probabilities)
     batch = data.batch
-    
-    no_loop_index,_ = remove_self_loops(data.edge_index)        
+
+    no_loop_index,_ = remove_self_loops(data.edge_index)
     no_loop_row, no_loop_col = no_loop_index
     num_graphs = batch.max().item() + 1
-    
+
     max_cardinalities = torch.zeros(num_graphs)
 
     total_index = 0
@@ -390,32 +389,48 @@ def decode_clique_final_speed(data, probabilities, draw=False, weight_factor = 0
         nlr_graph, nlc_graph = no_loop_index[:,mark_edges]
         nlr_graph = nlr_graph - total_index
         nlc_graph = nlc_graph - total_index
+
+        if known_degree_decode:
+            highest_degree_node = torch.mode(nlr_graph)[0].item()
+
         batch_graph = (batch==graph)
         graph_probs = sets[batch_graph].detach()
         sorted_inds = torch.argsort(graph_probs.squeeze(-1), descending=True)
-        num_nodes = batch_graph.long().sum()        
+        num_nodes = batch_graph.long().sum()
         current_set_cardinality = 0
         target_neighborhood = torch.tensor([])
-        node = 0
+
+        if not known_degree_decode:
+            node = 0
+
         max_width = beam
         if num_nodes>max_width:
-            beam_width = max_width 
+            beam_width = max_width
         else:
             beam_width = num_nodes
-            
+
         max_beam_weight = 0
         max_weight_node = 0
         graph_probs_1 = sets[batch_graph].detach()
         max_cardinality = 0
-        
-        for node in range(beam_width):
+
+        for node in range(1):
             blank_sets[batch_graph] = 0
             current_set_cardinality = 0
-            ind_i = total_index + sorted_inds[node]
-            ind_i = total_index + sorted_inds[node]
+
+            if known_degree_decode:
+                ind_i = total_index + highest_degree_node
+            else:
+                ind_i = total_index + sorted_inds[node]
+
             blank_sets[ind_i] = 1
             sets[ind_i] = 1 #IF A CLIQUE=
-            target_neighborhood = torch.unique(nlc_graph[nlr_graph == sorted_inds[node]])
+
+            if known_degree_decode:
+                target_neighborhood = torch.unique(nlc_graph[nlr_graph == highest_degree_node])
+            else:
+                target_neighborhood = torch.unique(nlc_graph[nlr_graph == sorted_inds[node]])
+
             decided = blank_sets[batch_graph]
             current_set_max_edges = (current_set_cardinality*(current_set_cardinality-1))/2
             current_set_edges = (decided[nlr_graph]*decided[nlc_graph]).sum()/2
@@ -434,22 +449,22 @@ def decode_clique_final_speed(data, probabilities, draw=False, weight_factor = 0
 
                 if (current_set_edges != current_set_max_edges):
                     sets[ind_i] = 0 #IF NOT A CLIQUE
-                    blank_sets[ind_i] = 0  
+                    blank_sets[ind_i] = 0
                     current_set_cardinality =  current_set_cardinality - 1
 
             if current_set_cardinality > max_cardinality:
                 max_cardinality = current_set_cardinality
         max_cardinalities[graph] = max_cardinality
-        if draw: 
+        if draw:
             dirac = data.locations[graph].item() - total_index
             if fig is None:
-                 f1 = plt.figure(graph,figsize=(16,9)) 
+                 f1 = plt.figure(graph,figsize=(16,9))
             else:
                  f1 = fig
             ax1 = f1.add_subplot(121)
             g1,g2 = drawGraphFromData(data.to('cpu'), graph, vals=sets.squeeze(-1).detach().cpu(), dense=False,seed=dirac, nodecolor=True,edgecolor=False,seedhops=True,hoplabels=True,binarycut=False)
             ax2 = f1.add_subplot(122)
-            g1,g2 = drawGraphFromData(data.to('cpu'), graph, vals=probabilities.detach().cpu(), dense=False,seed=dirac, nodecolor=True,edgecolor=False,seedhops=True,hoplabels=True,binarycut=False, clique = True)      
+            g1,g2 = drawGraphFromData(data.to('cpu'), graph, vals=probabilities.detach().cpu(), dense=False,seed=dirac, nodecolor=True,edgecolor=False,seedhops=True,hoplabels=True,binarycut=False, clique = True)
         total_index += num_nodes
 
     expected_weight_G = scatter_add(blank_sets[no_loop_col]*blank_sets[no_loop_row], batch[no_loop_row], 0, dim_size = num_graphs)
@@ -483,7 +498,7 @@ def solve_gurobi_maxclique(nx_graph, time_limit = None):
     m.optimize();
 
     set_size = m.objVal;
-    x_vals = [var.x for var in m.getVars()] 
+    x_vals = [var.x for var in m.getVars()]
 
     return set_size, x_vals
 
@@ -500,7 +515,7 @@ def solve_gurobi_mis(nx_graph, costs, time_limit = None):
 
     for node in nx_graph.nodes():
         x_vars['x_'+str(node)] = m.addVar(vtype=GRB.BINARY, name="x_"+str(node))
-        
+
     for cost in costs:
         c_vars['c_' + str(node)] = m.addVar(name="c_"+str(node))
 
@@ -515,6 +530,6 @@ def solve_gurobi_mis(nx_graph, costs, time_limit = None):
     m.optimize();
 
     set_size = m.objVal;
-    x_vals = [var.x for var in m.getVars()] 
+    x_vals = [var.x for var in m.getVars()]
 
     return set_size, x_vals

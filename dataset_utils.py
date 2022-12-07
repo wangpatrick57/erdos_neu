@@ -30,15 +30,15 @@ DATASET_NORM_SAMPLE_EVERY = {
     'IMDB-MULTI': 1,
     'IMDB-BINARY': 1,
     'ENZYMES': 1,
-    'COLLAB': 25, # 4516 total
-    'REDDIT-BINARY': 160, # 1649 total
+    'COLLAB': 60, # 903 total
+    'REDDIT-BINARY': 32, # 329 total
 }
 
 DATASET_BIG_SAMPLE_EVERY = {
     'IMDB-MULTI': 1,
     'IMDB-BINARY': 1,
     'ENZYMES': 1,
-    'COLLAB': 20, # 484 total
+    'COLLAB': 80, # 484 total
     'REDDIT-BINARY': 30, # 351 total
 }
 
