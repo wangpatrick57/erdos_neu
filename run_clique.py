@@ -377,9 +377,9 @@ def train_model(dataset, traindata, valdata, testdatas=None, penalty_coeff=4, re
 
 if __name__ == '__main__':
     dataset_name = sys.argv[1]
-    penalty_coeff = float(sys.argv[2])
-    reg_coeff = float(sys.argv[3])
-    known_degree_decode = bool(int(sys.argv[4]))
+    penalty_coeff = float(sys.argv[2]) # default: 4
+    reg_coeff = float(sys.argv[3]) # default: 0
+    known_degree_decode = bool(int(sys.argv[4])) # default: False
 
     small_dataset, big_dataset = get_dataset_small_big(dataset_name)
     traindata, valdata, testdata_norm = split_dataset_tvt(small_dataset)
